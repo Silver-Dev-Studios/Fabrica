@@ -1,0 +1,174 @@
+/* ========== FABRICA formats page ========== */
+
+.section.alt {
+  background: linear-gradient(180deg, var(--bg-1), transparent);
+}
+
+.mt { margin-top: 1.4rem; }
+
+/* ---------- file tree ---------- */
+
+.ftree {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  padding: 1.1rem 1.2rem;
+  font-size: 0.86rem;
+  overflow: auto;
+}
+
+.tree-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.22rem 0;
+  white-space: nowrap;
+  position: relative;
+}
+
+.tree-ico { font-size: 1rem; opacity: 0.85; }
+
+.tree-line code {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  color: var(--ink-dim);
+}
+
+.tree-root > code {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tree-highlight {
+  color: var(--java-hot) !important;
+}
+
+.arch-rp .tree-highlight { color: var(--bedrock-hot) !important; }
+
+.tree-note {
+  color: var(--ink-faint);
+  font-size: 14px;
+  margin-left: 0.4rem;
+}
+
+.dir-children {
+  margin-left: 1.1rem;
+  border-left: 1px solid var(--line);
+  padding-left: 0.7rem;
+}
+
+/* ---------- json cards ---------- */
+
+.jsoncard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #0d0f17;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.jsoncard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.9rem;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.jsoncard-title {
+  font-size: 16px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.jsoncard-title::before { content: '{ }'; color: var(--java); }
+.arch-rp .jsoncard-title::before { color: var(--bedrock); }
+
+.jsoncard pre {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: #b9c3dd;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+}
+
+.jsoncard pre::-webkit-scrollbar { height: 8px; }
+
+/* ---------- two-column format layout ---------- */
+
+.fmt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.6rem;
+  align-items: start;
+}
+
+.fmt-notes { display: flex; flex-direction: column; }
+
+/* ---------- bedrock architecture ---------- */
+
+.addon-arch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.6rem;
+  margin-top: 1.2rem;
+}
+
+.arch-pack {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.2rem;
+  background: var(--bg-2);
+}
+
+.arch-bp { border-top: 3px solid var(--java); }
+.arch-rp { border-top: 3px solid var(--bedrock); }
+
+.arch-label {
+  display: inline-block;
+  font-size: 15px;
+  letter-spacing: 0.16em;
+  color: var(--ink-dim);
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-bright);
+  background: var(--bg-1);
+  margin-bottom: 1rem;
+}
+
+.arch-bp .arch-label { color: var(--java-hot); border-color: rgba(255, 156, 63, 0.4); }
+.arch-rp .arch-label { color: var(--bedrock-hot); border-color: rgba(45, 227, 213, 0.4); }
+
+/* ---------- manifest spotlight ---------- */
+
+.manifest-spotlight {
+  margin-top: 2.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.6rem;
+  background:
+    radial-gradient(500px 200px at 90% 0%, rgba(45, 227, 213, 0.07), transparent 60%),
+    var(--bg-2);
+}
+
+.manifest-spotlight h3 { font-size: 12px; line-height: 1.7; }
+
+.manifest-spotlight .ghost { font-size: 0.92rem; }
+
+.manifest-spotlight .jsoncard { margin-top: 1.2rem; }
+
+/* ---------- CTA row ---------- */
+
+.cta-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 2.4rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 900px) {
+  .fmt-grid, .addon-arch { grid-template-columns: 1fr; }
+}

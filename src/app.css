@@ -1,0 +1,303 @@
+/* ========== FABRICA app chrome: header, footer ========== */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- header ---------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(13, 14, 22, 0.86);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  height: 74px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.brand-logo {
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 0 10px var(--java-glow));
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.brand-name {
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  text-shadow: 0 0 14px var(--java-glow);
+}
+
+.brand-sub {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+
+.main-nav {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: 1rem;
+  flex: 1;
+}
+
+.nav-link {
+  padding: 0.5rem 0.9rem;
+  border-radius: 9px;
+  color: var(--ink-dim);
+  font-weight: 600;
+  font-size: 0.94rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-link:hover {
+  color: var(--ink);
+  background: var(--bg-2);
+}
+
+.nav-link.active {
+  color: var(--ink);
+  background: var(--bg-3);
+  box-shadow: inset 0 0 0 1px var(--line-bright);
+}
+
+.plus-glyph {
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.header-cta {
+  flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .header-inner { gap: 0.6rem; }
+  .brand-sub { display: none; }
+  .main-nav { margin-left: 0; gap: 0.1rem; }
+  .nav-link { padding: 0.4rem 0.55rem; font-size: 0.86rem; }
+  .header-cta { padding: 0.5rem 0.7rem; font-size: 0.8rem; }
+}
+
+/* ---------- footer ---------- */
+
+.site-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  background:
+    radial-gradient(700px 300px at 80% 0%, rgba(255, 156, 63, 0.05), transparent 60%),
+    var(--bg-0);
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1.4fr;
+  gap: 2rem;
+  padding: 3rem 0 2rem;
+}
+
+.footer-logo {
+  width: 64px;
+  height: 64px;
+  margin-bottom: 0.8rem;
+  filter: drop-shadow(0 0 12px var(--java-glow));
+}
+
+.footer-tagline {
+  font-size: 17px;
+  color: var(--ink-dim);
+}
+
+.footer-col h4 {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink);
+  margin-bottom: 0.9rem;
+}
+
+.footer-col ul li {
+  padding: 0.28rem 0;
+  color: var(--ink-dim);
+  font-size: 0.94rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.footer-col ul li a { color: var(--ink-dim); }
+.footer-col ul li a:hover { color: var(--java-hot); }
+
+.footer-silver {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.footer-slogan {
+  color: var(--java);
+  font-size: 16px;
+  margin: 0.4rem 0 0;
+  letter-spacing: 0.12em;
+}
+
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 1.2rem 0 1.6rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+}
+
+.footer-note { text-align: right; }
+
+@media (max-width: 900px) {
+  .footer-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 560px) {
+  .footer-grid { grid-template-columns: 1fr; }
+}
+
+/* ========== shared bits used by pages ========== */
+
+.page-hero {
+  position: relative;
+  padding: 4.5rem 0 3.5rem;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(900px 380px at 50% -10%, var(--glow, rgba(255, 156, 63, 0.1)), transparent 70%);
+}
+
+.page-hero .container { position: relative; z-index: 1; }
+
+.page-hero h1 {
+  font-family: var(--font-pixel);
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+  line-height: 1.3;
+  margin-bottom: 0.6rem;
+}
+
+.page-hero h1 .edition { display: block; }
+
+.page-hero .lede {
+  max-width: 640px;
+  margin: 0 auto 1.2rem;
+  color: var(--ink-dim);
+  font-size: 1.05rem;
+}
+
+.crumbs {
+  font-family: var(--font-term);
+  font-size: 17px;
+  color: var(--ink-faint);
+  margin-bottom: 0.8rem;
+}
+.crumbs a { color: var(--ink-dim); }
+.crumbs a:hover { color: var(--ink); }
+
+/* stat pill row */
+.stat-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 1.6rem;
+}
+
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: 999px;
+  font-size: 0.84rem;
+  color: var(--ink-dim);
+}
+
+.stat-pill b { color: var(--ink); font-family: var(--font-term); font-size: 17px; }
+
+/* callout boxes */
+.callout {
+  display: flex;
+  gap: 0.9rem;
+  padding: 1rem 1.2rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--ink-dim);
+  font-size: 0.93rem;
+  margin: 1.1rem 0;
+}
+.callout .call-ico { font-size: 1.3rem; line-height: 1.4; }
+.callout.tip { border-color: rgba(69, 227, 154, 0.4); background: rgba(69, 227, 154, 0.05); }
+.callout.warn { border-color: rgba(255, 207, 92, 0.45); background: rgba(255, 207, 92, 0.05); }
+.callout.info { border-color: rgba(45, 227, 213, 0.35); background: rgba(45, 227, 213, 0.05); }
+
+/* table styling shared with formats page */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.data-table th {
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+  text-align: left;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--line-bright);
+  background: var(--bg-3);
+}
+
+.data-table td {
+  padding: 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+
+.data-table tr:last-child td { border-bottom: 0; }
+
+.data-table td b, .data-table td code { color: var(--ink); }
+
+.data-table .mono-small {
+  font-family: var(--font-term);
+  font-size: 16px;
+  color: var(--java-hot);
+}
