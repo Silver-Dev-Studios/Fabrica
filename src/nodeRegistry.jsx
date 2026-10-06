@@ -5,8 +5,29 @@
  * the forges (generators) that turn a node into real files.
  */
 
+import {
+  checkerGrid,
+  renderPng
+} from './data/imageUtils.js';
+import { MOB_SKIN_SIZE } from './components/Painters.jsx';
+
 let uidCounter = 0;
 export const uid = () => `k-${Date.now().toString(36)}-${(uidCounter++).toString(36)}`;
+
+/** A 16×16 pixel grid (#rrggbbaa strings), with fallback for old projects. */
+export function pixelGridOf(node, size = 16) {
+  const g = node && node.pixelGrid;
+  if (Array.isArray(g) && g.length === size * size) return g;
+  return checkerGrid(size, size);
+}
+
+/** A 64×64 skin grid, with fallback for old projects. */
+export function skinGridOf(node) {
+  const s = MOB_SKIN_SIZE * MOB_SKIN_SIZE;
+  const g = node && node.skinGrid;
+  if (Array.isArray(g) && g.length === s) return g;
+  return checkerGrid(MOB_SKIN_SIZE, MOB_SKIN_SIZE);
+}
 
 function kinds(isSword) {
   return isSword
@@ -53,25 +74,31 @@ export function makeNode(type, edition) {
       base.identifier = 'new_block';
       base.render = 'axis';
       base.creativeTab = 'misc';
+      base.pixelGrid = checkerGrid(16, 16);
       break;
     case 'mob':
       base.name = 'New Mob';
       base.identifier = 'new_mob';
       base.spawnEgg = true;
+      base.skinGrid = checkerGrid(MOB_SKIN_SIZE, MOB_SKIN_SIZE);
       break;
     case 'item':
       base.name = 'New Item';
       base.identifier = 'new_item';
       base.maxStack = 64;
+      base.pixelGrid = checkerGrid(16, 16);
       break;
     case 'tool':
       base.name = 'New Tool';
       base.identifier = 'new_tool';
       base.tier = 'diamond';
+      base.pixelGrid = checkerGrid(16, 16);
       break;
     case 'texture':
       base.name = 'New Texture';
       base.identifier = 'new_texture';
+      base.pixelGrid = checkerGrid(16, 16);
+      base.textureCategory = 'block';
       break;
     case 'recipe':
       base.name = 'Crafting Recipe';
@@ -209,108 +236,8 @@ function jsonBytes(obj) {
   return new TextEncoder().encode(JSON.stringify(obj, null, 2));
 }
 
-function texturePng(paths) {
-  // A real minimal PNG (RGBA, 16x16) with a checkboard built in JS.
-  // We compute the CRC32 in JavaScript and assemble the containers by hand.
-  const W = 16;
-  const H = 16;
-  // Each scanline: 1 filter byte (none) + W*4 RGBA bytes.
-  const raw = new Uint8Array(H * (1 + W * 4));
-  let off = 0;
-  for (let y = 0; y < H; y++) {
-    raw[off++] = 0; // filter: none
-    for (let x = 0; x < W; x++) {
-      const p = (x + y) % 2 === 0;
-      raw[off++] = p ? 190 : 150;
-      raw[off++] = p ? 170 : 130;
-      raw[off++] = p ? 90 : 70;
-      raw[off++] = 255;
-    }
-  }
-  // IHDR must be exactly 13 bytes: width, height (4 bytes BE each) then 1-byte
-  // bit depth, color type, compression, filter and interlace fields.
-  const ihdr = new Uint8Array(13);
-  new DataView(ihdr.buffer).setUint32(0, W, false);
-  new DataView(ihdr.buffer).setUint32(4, H, false);
-  ihdr[8] = 8;  // bit depth
-  ihdr[9] = 6;  // color type: RGBA
-  const zlib = zlibWrap(deflateRaw(raw), raw);
-  const atoms = [
-    buildPng('IHDR', ihdr),
-    buildPng('IDAT', zlib),
-    buildPng('IEND', new Uint8Array(0))
-  ];
-  const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-  const body = concat(...atoms);
-  const out = new Uint8Array(sig.length + body.length);
-  out.set(sig, 0);
-  out.set(body, sig.length);
-  return out;
-}
-
-function zlibWrap(stored, payload) {
-  // "stored" is a raw deflate stream (BFINAL stored block). Wrap it in the
-  // 2-byte zlib header + Adler-32 checksum that the PNG spec requires.
-  const out = new Uint8Array(stored.length + 6);
-  out[0] = 0x78; // CMF: 32K window, deflate
-  out[1] = 0x01; // FLG: FCHECK for the default FLEVEL-0 settings
-  out.set(stored, 2);
-  const adler = adler32(payload);
-  new DataView(out.buffer).setUint32(2 + stored.length, adler, false);
-  return out;
-}
-
-function adler32(data) {
-  let a = 1, b = 0;
-  const MOD = 65521;
-  for (let i = 0; i < data.length; i++) {
-    a = (a + data[i]) % MOD;
-    b = (b + a) % MOD;
-  }
-  return ((b << 16) | a) >>> 0;
-}
-
-function crc32(data) {
-  let c = ~0;
-  for (let i = 0; i < data.length; i++) {
-    c ^= data[i];
-    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
-  }
-  return (~c) >>> 0;
-}
-
-function buildPng(type, data) {
-  const len = new Uint8Array(4);
-  new DataView(len.buffer).setUint32(0, data.length, false);
-  const typeBytes = new TextEncoder().encode(type);
-  const crcBytes = new Uint8Array(4);
-  new DataView(crcBytes.buffer).setUint32(0, crc32(concat(typeBytes, data)), false);
-  return concat(len, typeBytes, data, crcBytes);
-}
-
-function concat(...arrs) {
-  const total = arrs.reduce((n, a) => n + a.length, 0);
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const a of arrs) {
-    out.set(a, o);
-    o += a.length;
-  }
-  return new Uint8Array(out);
-}
-
-function deflateRaw(data) {
-  // zip COMPSIZE except the 2 byte header and 4 byte checksum — the raw deflate stream.
-  // CRC is computed separately. We use a single uncompressed zlib-correct block and fix
-  // headers by hand. Start with a stored (type 00) fixed block.
-
-  // We build: block header (final, stored) then LEN, NLEN then data.
-  const head = new Uint8Array(5);
-  const dv = new DataView(head.buffer);
-  dv.setUint8(0, 1); // BFINAL=1, BTYPE=00
-  dv.setUint16(1, data.length, true);
-  dv.setUint16(3, (~data.length) & 0xffff, true);
-  return concat(head, data);
+function texturePng(grid, w = 16, h = 16) {
+  return renderPng(grid, w, h);
 }
 
 export const javaForge = {
@@ -320,36 +247,38 @@ export const javaForge = {
     const id = (node.identifier || 'item').toLowerCase().replace(/[^a-z0-9_.]/g, '_');
     const files = {};
 
-    // a neutral pixel texture is always provided
-    const texRel = node.texture
-      ? node.texture.replace(/^textures\//, '').replace(/\.png$/, '')
-      : `${ns}/${id}`;
+    // custom texture path if given, else a per-type default
+    const customTex = (node.texture || '').toLowerCase().replace(/^textures\//, '').replace(/\.png$/, '').trim();
+    const defaultTex = () => {
+      if (node.type === 'block') return `block/${id}`;
+      if (node.type === 'mob') return `entity/${id}`;
+      if (node.type === 'texture') return (node.textureCategory === 'item' ? 'item' : 'block') + `/${id}`;
+      return `item/${id}`;
+    };
+    const texRef = customTex || defaultTex();
 
     switch (node.type) {
       case 'block': {
-        // pack.mcmeta + blockstate + model
         files['assets/' + ns + '/blockstates/' + id + '.json'] = jsonBytes({
           variants: { '': { model: `${ns}:block/${id}` } }
         });
         files['assets/' + ns + '/models/block/' + id + '.json'] = jsonBytes({
           parent: 'minecraft:block/cube_all',
-          textures: { all: `${ns}:block/${id}` }
+          textures: { all: `${ns}:${texRef}` }
         });
         files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
           parent: `${ns}:block/${id}`
         });
-        if (node.lootTable || true) {
-          files['data/' + ns + '/loot_table/blocks/' + id + '.json'] = jsonBytes({
-            type: 'minecraft:block',
-            pools: [
-              {
-                rolls: 1,
-                entries: [{ type: 'minecraft:item', name: `${ns}:${id}` }],
-                conditions: [{ condition: 'minecraft:survives_explosion' }]
-              }
-            ]
-          });
-        }
+        files['data/' + ns + '/loot_table/blocks/' + id + '.json'] = jsonBytes({
+          type: 'minecraft:block',
+          pools: [
+            {
+              rolls: 1,
+              entries: [{ type: 'minecraft:item', name: `${ns}:${id}` }],
+              conditions: [{ condition: 'minecraft:survives_explosion' }]
+            }
+          ]
+        });
         files['data/' + ns + '/recipe/' + id + '.json'] = jsonBytes({
           type: 'minecraft:crafting_shaped',
           category: 'building',
@@ -358,13 +287,21 @@ export const javaForge = {
           key: { '#': { item: 'minecraft:cobblestone' } },
           result: { id: `${ns}:${id}`, count: 1 }
         });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'mob': {
+        // Java Edition has no data-pack mob model, but we still ship the skin
+        // so it can be referenced by resource packs / future datapack models.
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(skinGridOf(node), 64, 64);
         break;
       }
 
       case 'item': {
         files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
           parent: 'minecraft:item/generated',
-          textures: { layer0: `${ns}:item/${id}` }
+          textures: { layer0: `${ns}:${texRef}` }
         });
         files['data/' + ns + '/recipe/' + id + '.json'] = jsonBytes({
           type: 'minecraft:crafting_shaped',
@@ -373,6 +310,7 @@ export const javaForge = {
           key: { I: { item: 'minecraft:iron_ingot' } },
           result: { id: `${ns}:${id}`, count: 1 }
         });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
@@ -383,7 +321,7 @@ export const javaForge = {
         const pattern = kinds(isSword);
         files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
           parent: 'minecraft:item/handheld',
-          textures: { layer0: `${ns}:item/${id}` }
+          textures: { layer0: `${ns}:${texRef}` }
         });
         // 1.21+ item definition — makes the tool glow in the hotbar
         files['data/' + ns + '/item/' + id + '.json'] = jsonBytes({
@@ -396,14 +334,14 @@ export const javaForge = {
           key: { I: { item: 'minecraft:iron_ingot' }, S: { item: 'minecraft:stick' } },
           result: { id: `${ns}:${id}` }
         });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
       case 'texture': {
         // The texture node only supplies artwork — generate every path a pack may need.
-        const base = node.texture ? node.texture.replace(/\.png$/, '') : `${ns}/${id}`;
-        for (const name of [base, `${base}_n`, `${base}_s`]) {
-          files['assets/' + ns + '/textures/' + name + '.png'] = texturePng();
+        for (const name of [texRef, `${texRef}_n`, `${texRef}_s`]) {
+          files['assets/' + ns + '/textures/' + name + '.png'] = texturePng(pixelGridOf(node), 16, 16);
         }
         break;
       }
@@ -498,7 +436,6 @@ export const javaForge = {
         break;
     }
 
-    files['assets/' + ns + '/textures/' + texRel.replace(`${ns}/`, '') + '.png'] = texturePng();
     return files;
   },
 
@@ -532,77 +469,126 @@ export const javaForge = {
    Bedrock Edition forge — .mcpack / .mcaddon
    ============================================================ */
 
+const sanitizeId = (s) => (s || 'item').toLowerCase().replace(/[^a-z0-9_.]/g, '_').replace(/^_+|_+$/g, '') || 'item';
+
+// Per-face UV helper for the classic mob skin layout (64x64 texture).
+const box = (origin, size, facesBySide) => ({
+  origin,
+  size,
+  uv: {
+    north: { uv: facesBySide.north, texture_size: [64, 64] },
+    south: { uv: facesBySide.south, texture_size: [64, 64] },
+    east: { uv: facesBySide.east, texture_size: [64, 64] },
+    west: { uv: facesBySide.west, texture_size: [64, 64] },
+    up: { uv: facesBySide.up, texture_size: [64, 64] },
+    down: { uv: facesBySide.down, texture_size: [64, 64] }
+  }
+});
+
+// Classic humanoid geometry (zombie-style) wired to a standard 64x64 skin.
+function humanoidGeometry(id) {
+  const head = box([-4, 24, -4], [8, 8, 8], {
+    north: [8, 8], south: [24, 8], east: [16, 8], west: [0, 8],
+    up: [8, 0], down: [16, 0]
+  });
+  const body = box([-4, 12, -2], [8, 12, 4], {
+    north: [20, 20], south: [32, 20], east: [28, 20], west: [16, 20],
+    up: [20, 16], down: [28, 16]
+  });
+  const arm = box([-8, 12, -2], [4, 12, 4], {
+    north: [44, 20], south: [52, 20], east: [48, 20], west: [40, 20],
+    up: [44, 16], down: [48, 16]
+  });
+  const rightLeg = box([-4, 0, -2], [4, 12, 4], {
+    north: [4, 20], south: [12, 20], east: [8, 20], west: [0, 20],
+    up: [4, 16], down: [8, 16]
+  });
+  return {
+    format_version: '1.12.0',
+    'minecraft:geometry': [
+      {
+        description: {
+          identifier: `geo.${id}.geometry`,
+          texture_width: 64,
+          texture_height: 64,
+          visible_bounds_width: 3,
+          visible_bounds_height: 4,
+          visible_bounds_offset: [0, 2, 0]
+        },
+        bones: [
+          {
+            name: 'body',
+            pivot: [0, 12, 0],
+            cubes: [
+              body,
+              { ...arm, origin: [-8, 12, -2] },
+              { ...arm, origin: [4, 12, -2] }
+            ]
+          },
+          { name: 'head', pivot: [0, 24, 0], cubes: [head] },
+          { name: 'rightLeg', pivot: [-2, 12, 0], cubes: [rightLeg] },
+          { name: 'leftLeg', pivot: [2, 12, 0], cubes: [{ ...rightLeg, origin: [0, 0, -2] }] }
+        ]
+      }
+    ]
+  };
+}
+
 export const bedrockForge = {
+  /**
+   * Build a node's Bedrock files as { bp: {path:bytes}, rp: {path:bytes} }.
+   * paths are relative to the pack root (no BP/RP folder prefix).
+   */
   make(node) {
     const ns = node.namespace || 'fabrica';
-    const id = (node.identifier || 'item').toLowerCase().replace(/[^a-z0-9_.]/g, '_');
-    const files = {};
-    const BP = `BP_${ns}/`;
-    const AP = `RP_${ns}/`;
-
-    const blockJson = () => {
-      const tag = node.creativeTab && node.creativeTab !== 'none'
-        ? { tags: [`${ns}:${node.creativeTab}`] } : {};
-      return {
-        format_version: '1.21.0',
-        'minecraft:block': {
-          description: {
-            identifier: `${ns}:${id}`,
-            menu_category: {
-              category: node.category || 'nature',
-              group: 'minecraft:itemGroup.name.' + (node.category || 'nature')
-            }
-          },
-          components: {
-            'minecraft:geometry': 'minecraft:geometry.full_block',
-            'minecraft:material_instances': {
-              '*': {
-                texture: `${ns}_${id}`,
-                render_method: node.renderMethod || 'opaque'
-              }
-            },
-            'minecraft:destructible_by_mining': {
-              seconds_to_destroy: 0.8
-            },
-            'minecraft:map_color': '#8a7b5c',
-            'minecraft:display_name': `${node.name || id}`,
-            ...tag
-          },
-          events: {}
-        }
-      };
-    };
+    const id = sanitizeId(node.identifier);
+    const bp = {};
+    const rp = {};
 
     switch (node.type) {
       case 'block': {
-        files[`${BP}blocks/${id}.json`] = jsonBytes(blockJson());
-        files[`${BP}textures/terrain_texture.json`] = jsonBytes({
-          resource_pack_name: `${ns}_resource`,
-          texture_name: 'atlas.terrain',
-          padding: 8,
-          num_mip_levels: 4,
-          texture_data: {
-            [`${ns}_${id}`]: {
-              textures: `textures/blocks/${id}`
+        const tag = node.creativeTab && node.creativeTab !== 'none'
+          ? { tags: [`${ns}:${node.creativeTab}`] } : {};
+        bp[`blocks/${id}.json`] = jsonBytes({
+          format_version: '1.21.0',
+          'minecraft:block': {
+            description: {
+              identifier: `${ns}:${id}`,
+              menu_category: {
+                category: node.category || 'nature',
+                group: 'minecraft:itemGroup.name.' + (node.category || 'nature')
+              }
+            },
+            components: {
+              'minecraft:geometry': 'minecraft:geometry.full_block',
+              'minecraft:material_instances': {
+                '*': {
+                  texture: `${ns}_${id}`,
+                  render_method: node.renderMethod || 'opaque'
+                }
+              },
+              'minecraft:destructible_by_mining': { seconds_to_destroy: 0.8 },
+              'minecraft:map_color': '#8a7b5c',
+              'minecraft:display_name': `${node.name || id}`,
+              ...tag
+            },
+            events: {}
+          }
+        });
+        bp[`loot_tables/blocks/${id}.json`] = jsonBytes({
+          pools: [
+            {
+              rolls: 1,
+              entries: [{ type: 'item', name: `${ns}:${id}`, weight: 1 }]
             }
-          }
+          ]
         });
-        files[`${AP}textures/blocks/${id}.png`] = texturePng();
-        files[`${AP}textures/terrain_texture.json`] = jsonBytes({
-          resource_pack_name: `${ns}_resource`,
-          texture_name: 'atlas.terrain',
-          padding: 8,
-          num_mip_levels: 4,
-          texture_data: {
-            [`${ns}_${id}`]: { textures: `textures/blocks/${id}` }
-          }
-        });
+        rp[`textures/blocks/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
       case 'mob': {
-        const geoName = `geo.${id}.geometry`;
-        files[`${BP}entities/${id}.json`] = jsonBytes({
+        bp[`entities/${id}.json`] = jsonBytes({
           format_version: '1.21.0',
           'minecraft:entity': {
             description: {
@@ -611,13 +597,7 @@ export const bedrockForge = {
               is_summonable: true,
               spawn_category: node.category || 'creature',
               ...(node.spawnEgg
-                ? {
-                    spawn_egg: {
-                      base_color: '#8a5a3a',
-                      overlay_color: '#ff9c3f',
-                      ...(node.texture ? { texture: `${ns}_${id}` } : {})
-                    }
-                  }
+                ? { spawn_egg: { base_color: '#8a5a3a', overlay_color: '#ff9c3f' } }
                 : {})
             },
             component_groups: {},
@@ -627,79 +607,31 @@ export const bedrockForge = {
               'minecraft:attack': { damage: Number(node.damage) || 3 },
               'minecraft:physics': {},
               'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
-              'minecraft:nameable': {},
+              'minecraft:nameable': { allow_name_tag_renaming: true },
               'minecraft:collision_box': { width: 0.6, height: 1.8 },
+              'minecraft:scale': { value: 1 },
               'minecraft:loot': { table: `loot_tables/entities/${id}.json` },
-              'minecraft:despawn': { despawn_from_distance: {} }
+              'minecraft:despawn': { despawn_from_distance: { min_distance: 48, max_distance: 64 } }
             },
             events: {}
           }
         });
-        files[`${BP}loot_tables/entities/${id}.json`] = jsonBytes({
-          pools: [
-            {
-              rolls: 1,
-              entries: [
-                {
-                  type: 'item',
-                  name: `${ns}:${id}`,
-                  weight: 1,
-                  functions: [{ function: 'set_count', count: 1 }]
-                }
-              ]
-            }
-          ]
-        });
-        // ugly cube geometry + cube texture
-        files[`${AP}models/entity/${id}.geo.json`] = jsonBytes({
-          format_version: '1.12.0',
-          'minecraft:geometry': [
-            {
-              description: {
-                identifier: geoName,
-                texture_width: 16,
-                texture_height: 16,
-                visible_bounds_width: 2,
-                visible_bounds_height: 3,
-                visible_bounds_offset: [0, 1, 0]
-              },
-              bones: [
-                {
-                  name: 'body',
-                  pivot: [0, 0, 0],
-                  cubes: [
-                    {
-                      origin: [-4, 0, -4],
-                      size: [8, 12, 8],
-                      uv: { north: { uv: [8, 0], texture_size: [16, 16] }, south: { uv: [0, 0], texture_size: [16, 16] }, east: { uv: [8, 0], texture_size: [16, 16] }, west: { uv: [0, 0], texture_size: [16, 16] }, up: { uv: [0, 0], texture_size: [16, 16] }, down: { uv: [4, 0], texture_size: [16, 16] } }
-                    }
-                  ]
-                },
-                {
-                  name: 'head',
-                  pivot: [0, 12, 0],
-                  cubes: [
-                    { origin: [-3, 12, -3], size: [6, 6, 6], uv: { north: { uv: [8, 8], texture_size: [16, 16] }, south: { uv: [0, 8], texture_size: [16, 16] }, east: { uv: [8, 8], texture_size: [16, 16] }, west: { uv: [0, 8], texture_size: [16, 16] }, up: { uv: [0, 0], texture_size: [16, 16] }, down: { uv: [4, 0], texture_size: [16, 16] } } }
-                  ]
-                }
-              ]
-            }
-          ]
-        });
-        files[`${AP}textures/entity/${id}.png`] = texturePng();
-        files[`${AP}entity/${id}.entity.json`] = jsonBytes({
+        bp[`loot_tables/entities/${id}.json`] = jsonBytes({ pools: [] });
+        rp[`models/entity/${id}.geo.json`] = jsonBytes(humanoidGeometry(id));
+        rp[`textures/entity/${id}.png`] = texturePng(skinGridOf(node), 64, 64);
+        rp[`entity/${id}.entity.json`] = jsonBytes({
           format_version: '1.10.0',
           'minecraft:client_entity': {
             description: {
               identifier: `${ns}:${id}`,
               materials: { default: 'entity_alphatest' },
               textures: { default: `textures/entity/${id}` },
-              geometry: { default: geoName },
+              geometry: { default: `geo.${id}.geometry` },
               render_controllers: ['controller.render.default']
             }
           }
         });
-        files[`${AP}render_controllers/${id}.render_controllers.json`] = jsonBytes({
+        rp[`render_controllers/${id}.render_controllers.json`] = jsonBytes({
           format_version: '1.10.0',
           render_controllers: {
             'controller.render.default': {
@@ -713,7 +645,7 @@ export const bedrockForge = {
       }
 
       case 'item': {
-        files[`${BP}items/${id}.json`] = jsonBytes({
+        bp[`items/${id}.json`] = jsonBytes({
           format_version: '1.20.60',
           'minecraft:item': {
             description: {
@@ -728,19 +660,12 @@ export const bedrockForge = {
             }
           }
         });
-        files[`${AP}textures/items/${id}.png`] = texturePng();
-        files[`${AP}textures/item_texture.json`] = jsonBytes({
-          resource_pack_name: `${ns}_resource`,
-          texture_name: 'atlas.items',
-          texture_data: {
-            [`${ns}_${id}`]: { textures: `textures/items/${id}` }
-          }
-        });
+        rp[`textures/items/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
       case 'tool': {
-        files[`${BP}items/${id}.json`] = jsonBytes({
+        bp[`items/${id}.json`] = jsonBytes({
           format_version: '1.20.60',
           'minecraft:item': {
             description: {
@@ -756,27 +681,24 @@ export const bedrockForge = {
             }
           }
         });
-        files[`${AP}textures/items/${id}.png`] = texturePng();
-        files[`${AP}textures/item_texture.json`] = jsonBytes({
-          resource_pack_name: `${ns}_resource`,
-          texture_name: 'atlas.items',
-          texture_data: {
-            [`${ns}_${id}`]: { textures: `textures/items/${id}` }
-          }
-        });
+        rp[`textures/items/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'texture': {
+        const cat = node.textureCategory === 'item' ? 'items' : 'blocks';
+        rp[`textures/${cat}/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
       case 'recipe': {
-        files[`${BP}recipes/${id}.json`] = jsonBytes({
+        bp[`recipes/${id}.json`] = jsonBytes({
           format_version: '1.17.0',
           'minecraft:recipe_shaped': {
             description: { identifier: `${ns}:${id}` },
             tags: ['crafting_table'],
             pattern: (node.shape || []).map((r) => r.join('')),
-            key: {
-              '#': { item: 'minecraft:iron_ingot' }
-            },
+            key: { '#': { item: 'minecraft:iron_ingot' } },
             result: { item: node.resultItem || 'minecraft:diamond', count: Number(node.resultCount) || 1 }
           }
         });
@@ -787,7 +709,7 @@ export const bedrockForge = {
         break;
     }
 
-    return files;
+    return { bp, rp };
   },
 
   /**
@@ -799,12 +721,52 @@ export const bedrockForge = {
    */
   async pack(project, full, flavor) {
     const { default: JSZip } = await import('jszip');
-    const ns = project.namespace || 'fabrica';
     const zip = new JSZip();
     const mkUuid = () =>
-      typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : '11111111-2222-3333-4444-555555555555';
+      (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : '11111111-2222-3333-4444-555555555555';
     const rpUuid = project.rpUuid || mkUuid();
     const bpUuid = project.bpUuid || mkUuid();
+
+    // Split every node into BP / RP file maps.
+    const bpFiles = {};
+    const rpFiles = {};
+    full.forEach((node) => {
+      const { bp, rp } = bedrockForge.make(node);
+      Object.entries(bp).forEach(([p, c]) => { bpFiles[p] = c; });
+      Object.entries(rp).forEach(([p, c]) => { rpFiles[p] = c; });
+    });
+
+    // Aggregated texture atlases — required for multiple blocks/items to import.
+    const terrain = {};
+    const items = {};
+    full.forEach((node) => {
+      const ns = node.namespace || 'fabrica';
+      const id = sanitizeId(node.identifier);
+      if (node.type === 'block') terrain[`${ns}_${id}`] = `textures/blocks/${id}`;
+      else if (node.type === 'item' || node.type === 'tool') items[`${ns}_${id}`] = `textures/items/${id}`;
+      else if (node.type === 'texture') {
+        (node.textureCategory === 'item' ? items : terrain)[`${ns}_${id}`] =
+          `textures/${node.textureCategory === 'item' ? 'items' : 'blocks'}/${id}`;
+      }
+    });
+    if (Object.keys(terrain).length) {
+      rpFiles['textures/terrain_texture.json'] = jsonBytes({
+        resource_pack_name: 'vanilla',
+        texture_name: 'atlas.terrain',
+        padding: 8,
+        num_mip_levels: 4,
+        texture_data: terrain
+      });
+    }
+    if (Object.keys(items).length) {
+      rpFiles['textures/item_texture.json'] = jsonBytes({
+        resource_pack_name: 'vanilla',
+        texture_name: 'atlas.items',
+        texture_data: items
+      });
+    }
 
     const manifest = (packName, type) => ({
       format_version: 2,
@@ -816,53 +778,44 @@ export const bedrockForge = {
         min_engine_version: [1, 20, 0]
       },
       modules: [
-        {
-          type: type === 'resources' ? 'resources' : 'data',
-          uuid: mkUuid(),
-          version: [1, 0, 0]
-        }
+        { type: type === 'resources' ? 'resources' : 'data', uuid: mkUuid(), version: [1, 0, 0] }
       ],
-      // In a .mcaddon the runtime links BP<->RP automatically; an explicit
-      // dependency also works for manually-imported .mcpack folders.
-      dependencies: type === 'resources' ? [] : [{ uuid: rpUuid, version: [1, 0, 0] }]
+      dependencies: type === 'resources'
+        ? []
+        : [{ uuid: rpUuid, version: [1, 0, 0], module_name: '@vanilla' }]
     });
 
-    // node.make returns paths already prefixed with BP_<ns>/ or RP_<ns>/;
-    // strip that prefix and relocate under whichever folder we're building.
-    const writeTree = (target, folders) => {
-      full.forEach((node) => {
-        Object.entries(bedrockForge.make(node)).forEach(([path, content]) => {
-          const folder = path.startsWith('RP_') ? folders.rp : folders.bp;
-          target.file(folder + path.replace(/^B?_?P?_?[^/]+\//, ''), content);
-        });
+    const writeSingle = (folder, files, rootZip = zip) => {
+      Object.entries(files).forEach(([p, c]) => {
+        const target = folder ? rootZip.folder(folder) : rootZip;
+        target.file(p, c);
       });
     };
 
-    const complete = (root, bpName, rpName) => {
-      const bp = root.folder(bpName);
-      const rp = root.folder(rpName);
-      bp.file('manifest.json', jsonBytes(manifest(`${project.name} Behavior`, 'data')));
-      rp.file('manifest.json', jsonBytes(manifest(`${project.name} Resource`, 'resources')));
-      bp.file('pack_icon.png', texturePng());
-      rp.file('pack_icon.png', texturePng());
-      writeTree(root, { bp: `${bpName}/`, rp: `${rpName}/` });
-    };
-
     if (flavor === 'mcaddon') {
-      // One file, two packs — the signature Bedrock "add-on" format.
-      complete(zip, 'BP', 'RP');
-    } else if (flavor === 'mcpack') {
-      complete(zip, `BP_${ns}`, `RP_${ns}`);
-    } else if (flavor === 'resource') {
-      const rp = zip.folder(`RP_${ns}`);
-      rp.file('manifest.json', jsonBytes(manifest(`${project.name} Resource`, 'resources')));
-      rp.file('pack_icon.png', texturePng());
-      writeTree(zip, { bp: `__none__/`, rp: `RP_${ns}/` });
-    } else if (flavor === 'behavior') {
-      const bp = zip.folder(`BP_${ns}`);
+      // One file, two packs — proper .mcaddon layout (manifests at folder roots).
+      const bp = zip.folder('BP');
+      const rp = zip.folder('RP');
       bp.file('manifest.json', jsonBytes(manifest(`${project.name} Behavior`, 'data')));
-      bp.file('pack_icon.png', texturePng());
-      writeTree(zip, { bp: `BP_${ns}/`, rp: `__none__/` });
+      rp.file('manifest.json', jsonBytes(manifest(`${project.name} Resource`, 'resources')));
+      bp.file('pack_icon.png', texturePng(checkerGrid(16, 16), 16, 16));
+      rp.file('pack_icon.png', texturePng(checkerGrid(16, 16), 16, 16));
+      writeSingle('BP', bpFiles, zip);
+      writeSingle('RP', rpFiles, zip);
+    } else if (flavor === 'resource') {
+      // Single resource pack: manifest sits at the ZIP ROOT or Minecraft
+      // refuses to import it.
+      const root = zip;
+      root.file('manifest.json', jsonBytes(manifest(`${project.name} Resource`, 'resources')));
+      root.file('pack_icon.png', texturePng(checkerGrid(16, 16), 16, 16));
+      writeSingle(null, rpFiles, root);
+    } else {
+      // Single behavior pack (flavor 'behavior', and legacy 'mcpack'):
+      // manifest at the ZIP ROOT.
+      const root = zip;
+      root.file('manifest.json', jsonBytes(manifest(`${project.name} Behavior`, 'data')));
+      root.file('pack_icon.png', texturePng(checkerGrid(16, 16), 16, 16));
+      writeSingle(null, bpFiles, root);
     }
 
     const blob = await zip.generateAsync({
@@ -872,7 +825,7 @@ export const bedrockForge = {
       platform: 'UNIX'
     });
     const ext = flavor === 'mcaddon' ? 'mcaddon' : 'mcpack';
-    const sfx = flavor === 'resource' ? '_RP' : flavor === 'behavior' ? '_BP' : '';
+    const sfx = flavor === 'resource' ? '_RP' : flavor === 'behavior' ? '_BP' : '_pack';
     return new File([blob], `${slug(project.name)}${sfx}.${ext}`, { type: 'application/zip' });
   }
 };

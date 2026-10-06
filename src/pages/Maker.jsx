@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { makeNode, nodeByType, javaForge, bedrockForge, NODE_TYPES as NODES_LIST } from '../nodeRegistry.jsx';
+import { makeNode, nodeByType, javaForge, bedrockForge, NODE_TYPES as NODES_LIST, uid } from '../nodeRegistry.jsx';
+import { TexturePainter, MobSkinEditor, MOB_SKIN_SIZE } from '../components/Painters.jsx';
 import './maker.css';
 
 const EDITIONS = [
@@ -22,68 +23,101 @@ const EDITIONS = [
 ];
 
 export default function Maker() {
-  const [project, setProject] = useState(() => loadProject());
+  const [projects, setProjects] = useState(() => loadProjects());
+  const [activeId, setActiveId] = useState(() => projects[0]?.id || null);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    saveProject(project);
-  }, [project]);
+    saveProjects(projects);
+  }, [projects]);
 
-  const updateProject = (patch) => setProject((p) => ({ ...p, ...patch }));
-  const updateNode = (id, patch) =>
-    setProject((p) => ({
-      ...p,
-      nodes: p.nodes.map((n) => (n.id === id ? { ...n, ...patch, updated: Date.now() } : n))
-    }));
-  const addNode = (type) => {
-    const node = makeNode(type, project.edition);
-    setProject((p) => ({ ...p, nodes: [...p.nodes, node] }));
+  const active = projects.find((p) => p.id === activeId) || null;
+
+  const patchProject = (id, patch) =>
+    setProjects((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p)));
+  const updateNode = (id, nodeId, patch) =>
+    setProjects((ps) =>
+      ps.map((p) =>
+        p.id !== id
+          ? p
+          : { ...p, nodes: p.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch, updated: Date.now() } : n)) }
+      )
+    );
+  const addNode = (id, type) =>
+    setProjects((ps) =>
+      ps.map((p) => (p.id === id ? { ...p, nodes: [...p.nodes, makeNode(type, p.edition)] } : p))
+    );
+  const removeNode = (id, nodeId) =>
+    setProjects((ps) =>
+      ps.map((p) => (p.id === id ? { ...p, nodes: p.nodes.filter((n) => n.id !== nodeId) } : p))
+    );
+
+  const createProject = (edition, meta) => {
+    const id = projectId();
+    const p = freshProject(edition, id);
+    p.name = meta.name.trim();
+    p.description = meta.description.trim();
+    p.owner = meta.owner.trim();
+    setProjects((ps) => [...ps, p]);
+    setActiveId(id);
+    setCreating(false);
+    window.setTimeout(() => window.scrollTo(0, 0), 50);
   };
-  const removeNode = (id) =>
-    setProject((p) => ({ ...p, nodes: p.nodes.filter((n) => n.id !== id) }));
 
-  const canExport = project.name.trim() && project.description.trim() && project.owner.trim();
+  const deleteProject = (id) => {
+    setProjects((ps) => {
+      const next = ps.filter((p) => p.id !== id);
+      if (activeId === id && next.length) setActiveId(next[0].id);
+      if (activeId === id && !next.length) setActiveId(null);
+      return next;
+    });
+  };
 
-  const freshProject = (edition) => ({
-    name: '',
-    description: '',
-    owner: '',
-    namespace: 'fabrica',
-    edition,
-    createdAt: Date.now(),
-    nodes: []
-  });
+  const switchProject = (id) => {
+    setActiveId(id);
+    window.setTimeout(() => window.scrollTo(0, 0), 50);
+  };
+
+  const canExport = active && active.name.trim() && active.description.trim() && active.owner.trim();
 
   return (
     <div className="maker">
-      {!project.nodes.length && !project.name && (
-        <EmptyState onCreate={() => setCreating(true)} onRestore={project.nodes.length ? null : null} />
+      {!active && projects.length === 0 && (
+        <EmptyState onCreate={() => setCreating(true)} />
       )}
 
-      {project.name && (
+      {!active && projects.length > 0 && (
+        <EmptyState
+          onCreate={() => setCreating(true)}
+          projects={projects}
+          onOpen={switchProject}
+          onDelete={deleteProject}
+        />
+      )}
+
+      {active && (
         <Studio
-          project={project}
-          updateProject={updateProject}
-          updateNode={updateNode}
-          addNode={addNode}
-          removeNode={removeNode}
+          key={active.id}
+          project={active}
+          projects={projects}
+          activeId={activeId}
+          updateProject={(patch) => patchProject(active.id, patch)}
+          updateNode={(nodeId, patch) => updateNode(active.id, nodeId, patch)}
+          addNode={(type) => addNode(active.id, type)}
+          removeNode={(nodeId) => removeNode(active.id, nodeId)}
           canExport={canExport}
           onNewProject={() => setCreating(true)}
+          onSwitchProject={switchProject}
+          onDeleteProject={deleteProject}
         />
       )}
 
       {creating && (
         <CreateModal
-          initialEdition={project.edition}
+          initialEdition={active?.edition || 'java'}
+          existingNames={projects.map((p) => p.name.toLowerCase())}
           onClose={() => setCreating(false)}
-          onCreate={(edition, meta) => {
-            const p = freshProject(edition);
-            p.name = meta.name.trim();
-            p.description = meta.description.trim();
-            p.owner = meta.owner.trim();
-            setProject(p);
-            setCreating(false);
-          }}
+          onCreate={createProject}
         />
       )}
     </div>
@@ -92,33 +126,59 @@ export default function Maker() {
 
 /* ---------- persistence ---------- */
 
-const STORAGE_KEY = 'fabrica-project-v1';
+const STORAGE_KEY = 'fabrica-projects-v2';
+const LEGACY_KEY = 'fabrica-project-v1';
 
-function loadProject() {
+function loadProjects() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { name: '', description: '', owner: '', namespace: 'fabrica', edition: 'java', createdAt: 0, nodes: [] };
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.nodes)) {
-      return { name: '', description: '', owner: '', namespace: 'fabrica', edition: 'java', createdAt: 0, nodes: [] };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
     }
-    return parsed;
-  } catch {
-    return { name: '', description: '', owner: '', namespace: 'fabrica', edition: 'java', createdAt: 0, nodes: [] };
-  }
+  } catch { /* ignore */ }
+  // Migrate the old single-project save into the add-on shelf.
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && Array.isArray(p.nodes)) {
+        return [{ ...p, id: projectId(), createdAt: p.createdAt || Date.now(), updatedAt: Date.now() }];
+      }
+    }
+  } catch { /* ignore */ }
+  return [];
 }
 
-function saveProject(project) {
+function saveProjects(projects) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-  } catch {
-    /* storage full or unavailable — ignore */
-  }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(projects));
+  } catch { /* storage full or unavailable — ignore */ }
+}
+
+function projectId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : uid();
+}
+
+function freshProject(edition, id) {
+  return {
+    id,
+    name: '',
+    description: '',
+    owner: '',
+    namespace: 'fabrica',
+    edition,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    nodes: []
+  };
 }
 
 /* ---------- empty state ---------- */
 
-function EmptyState({ onCreate }) {
+function EmptyState({ onCreate, projects, onOpen, onDelete }) {
   return (
     <section className="maker-empty">
       <div className="container empty-inner">
@@ -128,13 +188,31 @@ function EmptyState({ onCreate }) {
           <span className="font-bedrock">or</span> <span className="font-java">mob</span>.
         </h1>
         <p className="empty-lede">
-          Fabrica’s Mod Maker builds real Minecraft files as you work. Choose an edition,
-          give your project a name, description and owner — then start dropping “New” blocks
-          onto the forge table.
+          Fabrica’s Mod Maker builds real Minecraft files as you work. Give your add-on a name,
+          description and owner — then start dropping “New” blocks onto the forge table. You can
+          keep every add-on on your shelf and jump between them whenever you like.
         </p>
         <button className="btn btn-primary btn-lg" onClick={onCreate}>
-          ⚒ Create a project
+          ⚒ Create an add-on
         </button>
+
+        {projects && projects.length > 0 && (
+          <div className="shelf-empty anim-up">
+            <span className="term shelf-empty-title">YOUR ADD-ONS</span>
+            <div className="shelf-list">
+              {projects.map((p) => (
+                <div className="shelf-row" key={p.id}>
+                  <span className={`dot ${p.edition === 'java' ? 'java' : 'bedrock'}`} />
+                  <span className="shelf-row-main" onClick={() => onOpen(p.id)}>
+                    <b>{p.name}</b>
+                    <span className="term">{p.edition === 'java' ? 'Java · .zip' : 'Bedrock · .mcaddon'}</span>
+                  </span>
+                  <button className="row-del term" onClick={() => onDelete(p.id)} title="Delete add-on">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -142,14 +220,18 @@ function EmptyState({ onCreate }) {
 
 /* ---------- create modal ---------- */
 
-function CreateModal({ initialEdition, onClose, onCreate }) {
+function CreateModal({ initialEdition, existingNames, onClose, onCreate }) {
   const [edition, setEdition] = useState(initialEdition || 'java');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [owner, setOwner] = useState('');
   const [touched, setTouched] = useState({ name: false, description: false, owner: false });
 
-  const valid = { name: name.trim().length > 0, description: description.trim().length > 0, owner: owner.trim().length > 0 };
+  const valid = {
+    name: name.trim().length > 0 && !(existingNames || []).includes(name.trim().toLowerCase()),
+    description: description.trim().length > 0,
+    owner: owner.trim().length > 0
+  };
   const allValid = valid.name && valid.description && valid.owner;
 
   const submit = (e) => {
@@ -161,11 +243,11 @@ function CreateModal({ initialEdition, onClose, onCreate }) {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal anim-pop" role="dialog" aria-modal="true" aria-label="Create project">
+      <div className="modal anim-pop" role="dialog" aria-modal="true" aria-label="Create add-on">
         <div className="modal-head">
           <div>
             <span className="eyebrow">New project</span>
-            <h2 className="pixel">Forge a new mod</h2>
+            <h2 className="pixel">Forge a new add-on</h2>
           </div>
           <button className="modal-x" onClick={onClose} aria-label="Close">✕</button>
         </div>
@@ -201,7 +283,13 @@ function CreateModal({ initialEdition, onClose, onCreate }) {
               placeholder="e.g. Ruby Ores & Golems"
               autoFocus
             />
-            {touched.name && !valid.name && <span className="err">Give your mod a name — your pack folder and file will be named after it.</span>}
+            {touched.name && !valid.name && (
+              <span className="err">
+                {existingNames?.includes(name.trim().toLowerCase())
+                  ? 'You already have an add-on with that name.'
+                  : 'Give your add-on a name — its pack folder and file are named after it.'}
+              </span>
+            )}
           </div>
 
           <div className={`field ${touched.description && !valid.description ? 'invalid' : ''}`}>
@@ -242,7 +330,10 @@ function CreateModal({ initialEdition, onClose, onCreate }) {
 
 /* ---------- studio ---------- */
 
-function Studio({ project, updateProject, updateNode, addNode, removeNode, canExport, onNewProject }) {
+function Studio({
+  project, projects, activeId, updateProject, updateNode, addNode, removeNode,
+  canExport, onNewProject, onSwitchProject, onDeleteProject
+}) {
   const [selectedId, setSelectedId] = useState(project.nodes[0]?.id || null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
@@ -251,8 +342,10 @@ function Studio({ project, updateProject, updateNode, addNode, removeNode, canEx
   const selected = project.nodes.find((n) => n.id === selectedId) || null;
 
   useEffect(() => {
-    if (selectedId && !project.nodes.some((n) => n.id === selectedId)) {
-      setSelectedId(project.nodes[0]?.id || null);
+    if (!project.nodes.length) {
+      setSelectedId(null);
+    } else if (!selectedId || !project.nodes.some((n) => n.id === selectedId)) {
+      setSelectedId(project.nodes[0].id);
     }
   }, [project.nodes, selectedId]);
 
@@ -313,10 +406,14 @@ function Studio({ project, updateProject, updateNode, addNode, removeNode, canEx
     <div className="studio">
       <StudioToolbar
         project={project}
+        projects={projects}
+        activeId={activeId}
         updateProject={updateProject}
         stats={stats}
         canExport={canExport}
         onNewProject={onNewProject}
+        onSwitchProject={onSwitchProject}
+        onDeleteProject={onDeleteProject}
         onExportJava={() => doExport('zip')}
         onExportMcaddon={() => doExport('mcaddon')}
         onExportMcpack={() => doExport('behavior')}
@@ -404,8 +501,8 @@ function Studio({ project, updateProject, updateNode, addNode, removeNode, canEx
             <NodeEditor
               key={selected.id}
               node={selected}
-              update={updateNode}
-              remove={removeNode}
+              update={(patch) => updateNode(selected.id, patch)}
+              remove={() => removeNode(selected.id)}
               project={project}
             />
           ) : (
@@ -419,7 +516,68 @@ function Studio({ project, updateProject, updateNode, addNode, removeNode, canEx
   );
 }
 
-/* ---------- toolbar ---------- */
+/* ---------- toolbar + add-on shelf ---------- */
+
+function AddonMenu({ projects, activeId, onSwitch, onNew, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  return (
+    <div className="addon-menu" ref={ref}>
+      <button
+        className="btn btn-ghost btn-sm addon-toggle"
+        onClick={() => setOpen((o) => !o)}
+        title="Your created add-ons"
+      >
+        🧰 My add-ons
+        <span className="term addon-count">{projects.length}</span>
+        <span className={`term caret ${open ? 'open' : ''}`}>▾</span>
+      </button>
+      {open && (
+        <div className="addon-dropdown anim-pop">
+          <span className="term addon-dropdown-title">CREATED ADD-ONS</span>
+          <div className="addon-list">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                className={`addon-row ${p.id === activeId ? 'sel' : ''}`}
+                onClick={() => { onSwitch(p.id); setOpen(false); }}
+              >
+                <span className={`dot ${p.edition === 'java' ? 'java' : 'bedrock'}`} />
+                <span className="addon-row-main">
+                  <b>{p.name}</b>
+                  <span className="term">{p.edition === 'java' ? 'Java · .zip' : 'Bedrock · add-on'} · {p.nodes.length} node{p.nodes.length === 1 ? '' : 's'}</span>
+                </span>
+                <span
+                  className="node-chip-del"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Delete ${p.name}`}
+                  onClick={(e) => { e.stopPropagation(); onDelete(p.id); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); onDelete(p.id); } }}
+                >
+                  ✕
+                </span>
+              </div>
+            ))}
+            {!projects.length && <span className="term addon-empty">No add-ons yet.</span>}
+          </div>
+          <button className="addon-new btn btn-primary btn-sm" onClick={() => { setOpen(false); onNew(); }}>
+            ＋ New add-on
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ExportMenu({ canExport, busy, edition, onJava, onMcaddon, onMcpackBehavior, onMcpackResource }) {
   const [open, setOpen] = useState(false);
@@ -438,8 +596,8 @@ function ExportMenu({ canExport, busy, edition, onJava, onMcaddon, onMcpackBehav
     items.push({ label: 'Data pack', note: '.zip — world/datapacks/', color: 'java', action: onJava });
   } else {
     items.push({ label: 'Add-on (both packs)', note: '.mcaddon — share one file', color: 'bedrock', action: onMcaddon });
-    items.push({ label: 'Behavior pack only', note: '.mcpack — what things DO', color: 'bedrock', action: onMcpackBehavior });
-    items.push({ label: 'Resource pack only', note: '.mcpack — how things LOOK', color: 'bedrock', action: onMcpackResource });
+    items.push({ label: 'Resource pack', note: '.mcpack — how things LOOK', color: 'bedrock', action: onMcpackResource });
+    items.push({ label: 'Behavior pack', note: '.mcpack — what things DO', color: 'bedrock', action: onMcpackBehavior });
   }
 
   return (
@@ -469,7 +627,10 @@ function ExportMenu({ canExport, busy, edition, onJava, onMcaddon, onMcpackBehav
   );
 }
 
-function StudioToolbar({ project, updateProject, stats, canExport, onNewProject, onExportJava, onExportMcaddon, onExportMcpack, onExportRp, busy }) {
+function StudioToolbar({
+  project, projects, activeId, updateProject, stats, canExport, onNewProject,
+  onSwitchProject, onDeleteProject, onExportJava, onExportMcaddon, onExportMcpack, onExportRp, busy
+}) {
   return (
     <div className="studio-bar">
       <div className="container studio-bar-inner">
@@ -484,8 +645,15 @@ function StudioToolbar({ project, updateProject, stats, canExport, onNewProject,
         </div>
 
         <div className="studio-actions">
-          <button className="btn btn-ghost btn-sm" onClick={onNewProject} title="Start a new project">
-            ＋ New project
+          <AddonMenu
+            projects={projects}
+            activeId={activeId}
+            onSwitch={onSwitchProject}
+            onNew={onNewProject}
+            onDelete={onDeleteProject}
+          />
+          <button className="btn btn-ghost btn-sm" onClick={onNewProject} title="Start a new add-on">
+            ＋ New add-on
           </button>
           <ExportMenu
             canExport={canExport}
@@ -523,14 +691,13 @@ function NodeEditor({ node, update, remove, project }) {
   const [saved, setSaved] = useState(false);
   const saveTimer = useRef(null);
 
-  // little "saved" flash after every update
   useEffect(() => {
     setSaved(true);
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => setSaved(false), 700);
   }, [node.updated]);
 
-  const set = (patch) => update(node.id, patch);
+  const set = (patch) => update(patch);
 
   const idOk = /^[a-z0-9_.]+$/.test((node.identifier || '').trim());
 
@@ -564,13 +731,7 @@ function NodeEditor({ node, update, remove, project }) {
           <span className="pixel node-pane-name">{node.name || 'Untitled Node'}</span>
         </div>
         <span className={`saved-flash ${saved ? 'on' : ''}`}>✓ saved</span>
-        <button
-          className="node-delete"
-          onClick={() => remove(node.id)}
-          title="Delete node"
-        >
-          ✕
-        </button>
+        <button className="node-delete" onClick={remove} title="Delete node">✕</button>
       </div>
 
       <div className="node-pane-body">
@@ -596,23 +757,37 @@ function NodeSpecific({ node, set, project }) {
     case 'block':
       return (
         <>
-          <SectionTitle>Block behaviour</SectionTitle>
-          <Field label="Texture path" hint="Without the .png. Defaults to textures/&lt;namespace&gt;/&lt;id&gt;.">
-            <input value={node.texture || ''} onChange={(e) => set({ texture: e.target.value })} placeholder="textures/blocks/ruby_ore" />
-          </Field>
-          <Field label="Render method (Bedrock)" hint="opaque, alpha_test (cutout) or blends for glass.">
-            <select value={node.renderMethod || 'opaque'} onChange={(e) => set({ renderMethod: e.target.value })}>
-              <option value="opaque">opaque — solid block</option>
-              <option value="alpha_test">alpha_test — cutout (leaves, bars)</option>
-              <option value="blend">blend — translucent (glass, water)</option>
-            </select>
-          </Field>
-          <Field label="Creative category">
-            <select value={node.category || 'nature'} onChange={(e) => set({ category: e.target.value })}>
-              {['construction', 'nature', 'equipment', 'items', 'none'].map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
+          {node.edition === 'bedrock' && (
+            <>
+              <SectionTitle>Block behaviour</SectionTitle>
+              <Field label="Render method (Bedrock)" hint="opaque, alpha_test (cutout) or blends for glass.">
+                <select value={node.renderMethod || 'opaque'} onChange={(e) => set({ renderMethod: e.target.value })}>
+                  <option value="opaque">opaque — solid block</option>
+                  <option value="alpha_test">alpha_test — cutout (leaves, bars)</option>
+                  <option value="blend">blend — translucent (glass, water)</option>
+                </select>
+              </Field>
+              <Field label="Creative category">
+                <select value={node.category || 'nature'} onChange={(e) => set({ category: e.target.value })}>
+                  {['construction', 'nature', 'equipment', 'items', 'none'].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </Field>
+            </>
+          )}
+          <SectionTitle>Texture — 16×16 editor</SectionTitle>
+          {/* empty wrapper keeps Food/gallery above the fold */}
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="block"
+              width={16}
+            />
+          </div>
+          <Field label="Override texture path (optional)" hint="Advanced — normally Fabrica picks textures/blocks/&lt;id&gt; automatically.">
+            <input value={node.texture || ''} onChange={(e) => set({ texture: e.target.value })} placeholder="blocks/ruby_ore" />
           </Field>
         </>
       );
@@ -630,11 +805,20 @@ function NodeSpecific({ node, set, project }) {
           <Field label="Movement speed" hint="Vanilla player ≈ 0.1, zombie ≈ 0.23.">
             <input type="number" min="0" step="0.01" value={node.speed} onChange={(e) => set({ speed: e.target.value })} />
           </Field>
-          <SectionTitle>Spawning</SectionTitle>
-          <label className="toggle-row">
-            <input type="checkbox" checked={!!node.spawnEgg} onChange={(e) => set({ spawnEgg: e.target.checked })} />
-            <span>Give it a spawn egg</span>
-          </label>
+          <div className="spawn-row">
+            <label className="toggle-row">
+              <input type="checkbox" checked={!!node.spawnEgg} onChange={(e) => set({ spawnEgg: e.target.checked })} />
+              <span>Give it a spawn egg</span>
+            </label>
+          </div>
+
+          <SectionTitle>Mob skin — {MOB_SKIN_SIZE}×{MOB_SKIN_SIZE} editor</SectionTitle>
+          <div className="painter-slot">
+            <MobSkinEditor
+              grid={node.skinGrid || []}
+              setGrid={(g) => set({ skinGrid: g })}
+            />
+          </div>
         </>
       );
 
@@ -654,6 +838,15 @@ function NodeSpecific({ node, set, project }) {
               ))}
             </select>
           </Field>
+          <SectionTitle>Texture — 16×16 editor</SectionTitle>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="item"
+              width={16}
+            />
+          </div>
         </>
       );
 
@@ -671,26 +864,39 @@ function NodeSpecific({ node, set, project }) {
               {TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="Texture path">
-            <input value={node.texture || ''} onChange={(e) => set({ texture: e.target.value })} placeholder="textures/item/ruby_sword" />
-          </Field>
+          <SectionTitle>Texture — 16×16 editor</SectionTitle>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="item"
+              width={16}
+            />
+          </div>
         </>
       );
 
     case 'texture':
       return (
         <>
-          <SectionTitle>Texture artwork</SectionTitle>
-          <Field label="Texture path" hint="Generated placeholder pixels to start; swap in your own .png later.">
-            <input value={node.texture || ''} onChange={(e) => set({ texture: e.target.value })} placeholder="textures/blocks/ruby_ore" />
+          <SectionTitle>Texture artwork — 16×16 editor</SectionTitle>
+          <Field label="Category" hint="Decides where this art lands inside your pack.">
+            <select value={node.textureCategory || 'block'} onChange={(e) => set({ textureCategory: e.target.value })}>
+              <option value="block">Block texture</option>
+              <option value="item">Item texture</option>
+            </select>
           </Field>
-          <div className="texpreview">
-            <PixelTexture seed={node.texture || node.id} />
-            <div>
-              <b>16×16 placeholder</b>
-              <span className="term">A real PNG with an RGBA checkerboard lands in your pack so nothing is ever missing.</span>
-            </div>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category={node.textureCategory === 'item' ? 'item' : 'block'}
+              width={16}
+            />
           </div>
+          <Field label="Override texture path (optional)">
+            <input value={node.texture || ''} onChange={(e) => set({ texture: e.target.value })} placeholder="blocks/custom_thing" />
+          </Field>
         </>
       );
 
@@ -780,46 +986,6 @@ function NodeSpecific({ node, set, project }) {
     default:
       return null;
   }
-}
-
-/* a deterministic 16x16 preview from a tiny string hash */
-function PixelTexture({ seed }) {
-  const rows = useMemo(() => {
-    let h = 2166136261;
-    for (let i = 0; i < (seed || '').length; i++) {
-      h ^= (seed || '').charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    const palette = [
-      '#ff9c3f', '#2de3d5', '#8f4b6d', '#4f8fd0', '#43b07a',
-      '#d0a34f', '#7a5fd0', '#c96f2c', '#6d788f'
-    ];
-    const px = [];
-    for (let y = 0; y < 16; y++) {
-      const row = [];
-      for (let x = 0; x < 16; x++) {
-        h ^= (x << 8) ^ y;
-        h = Math.imul(h, 16777619);
-        row.push(palette[h % palette.length]);
-      }
-      px.push(row);
-    }
-    return px;
-  }, [seed]);
-
-  return (
-    <div className="pixel-preview">
-      {rows.flatMap((row, y) =>
-        row.map((color, x) => (
-          <span
-            key={`${x}-${y}`}
-            className="px"
-            style={{ background: color }}
-          />
-        ))
-      )}
-    </div>
-  );
 }
 
 function RecipeGrid({ node, set }) {
