@@ -133,8 +133,8 @@ function Hero() {
         </span>
 
         <h1 className="hero-title">
-          <span className="hero-word pixel font-java">FORGE</span>
-          <span className="hero-word pixel font-bedrock">MINECRAFT</span>
+          <span className="hero-word pixel font-java">FABRICA</span>
+          <span className="hero-word pixel font-bedrock">FOR MINECRAFT</span>
           <span className="hero-sub-term term">data packs &amp; add-ons — without the headache</span>
         </h1>
 
