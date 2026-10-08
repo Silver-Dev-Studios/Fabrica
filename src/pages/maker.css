@@ -756,6 +756,58 @@
 }
 .spawn-row .toggle-row { margin-bottom: 0.4rem; }
 
+/* spawn-egg colour pickers */
+.egg-colors {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px dashed var(--line-bright);
+  border-radius: 10px;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg-1);
+}
+.color-field-label {
+  font-size: 14px;
+  color: var(--ink-dim);
+  letter-spacing: 0.06em;
+  flex: 1;
+}
+.color-field input[type='color'] {
+  width: 34px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.color-hex {
+  width: 76px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  padding: 0.3rem 0.4rem;
+  font-size: 14px;
+  outline: none;
+}
+.color-hex:focus { border-color: var(--java); box-shadow: 0 0 0 3px var(--java-glow); }
+
+/* recipe ingredient mappings */
+.recipe-ingredients {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
 /* ---------- pixel editor (pixie) ---------- */
 
 .painter-slot {
