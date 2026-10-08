@@ -35,6 +35,17 @@ function kinds(isSword) {
     : ['II', 'IS', ' S'];
 }
 
+/**
+ * Map one recipe-grid letter to an actual ingredient. Each node can supply an
+ * optional `ingredients` map ({A: "minecraft:stick", B: "ns:ruby", ...});
+ * unknown letters fall back to a sensible material.
+ */
+function lookupIngredient(node, letter) {
+  const overrides = node.ingredients || {};
+  if (overrides[letter] && overrides[letter].trim()) return overrides[letter].trim();
+  return { A: 'minecraft:stick', B: 'minecraft:iron_ingot', C: 'minecraft:coal', D: 'minecraft:diamond' }[letter] || 'minecraft:stone';
+}
+
 export function makeNode(type, edition) {
   const base = {
     id: uid(),
@@ -61,10 +72,35 @@ export function makeNode(type, edition) {
     projectile: false,
     rideable: false,
     burning: false,
+    hostile: false,
     creativeTab: 'misc',
     render: 'axis',
     rarity: 'common',
     woodMaterial: 'oak',
+    // food
+    nutrition: 4,
+    saturation: 0.6,
+    canAlwaysEat: false,
+    useDuration: 1.6,
+    // armor
+    armorSlot: 'chest',
+    protection: 4,
+    // tool / weapon
+    attackDamage: 5,
+    durability: 264,
+    digSpeed: 6,
+    // mob
+    scale: 1,
+    spawnEggBase: '#8a5a3a',
+    spawnEggOverlay: '#ff9c3f',
+    // recipe
+    recipeKind: 'crafting',
+    smeltInput: 'minecraft:iron_ore',
+    smeltResult: 'minecraft:iron_ingot',
+    smeltXp: 0.7,
+    // ore
+    oreDrop: '',
+    oreCount: 1,
     updated: Date.now()
   };
 
@@ -104,8 +140,8 @@ export function makeNode(type, edition) {
       base.name = 'Crafting Recipe';
       base.identifier = 'new_recipe';
       base.shape = [
-        ['#', '#'],
-        ['#', '#']
+        ['A', 'A'],
+        ['A', 'A']
       ];
       base.patternNote = 'Edit the grid below — use letters for ingredients, blank for empty.';
       break;
@@ -131,6 +167,27 @@ export function makeNode(type, edition) {
     case 'structure':
       base.name = 'Structure';
       base.identifier = 'new_structure';
+      break;
+    case 'food':
+      base.name = 'New Food';
+      base.identifier = 'new_food';
+      base.nutrition = 4;
+      base.saturation = 0.6;
+      base.pixelGrid = checkerGrid(16, 16);
+      break;
+    case 'armor':
+      base.name = 'New Armor';
+      base.identifier = 'new_armor';
+      base.armorSlot = 'chest';
+      base.protection = 4;
+      base.pixelGrid = checkerGrid(16, 16);
+      break;
+    case 'ore':
+      base.name = 'New Ore';
+      base.identifier = 'new_ore';
+      base.oreDrop = '';
+      base.oreCount = 1;
+      base.pixelGrid = checkerGrid(16, 16);
       break;
     default:
       base.name = 'New Node';
@@ -172,6 +229,27 @@ export const NODE_TYPES = [
     tagline: 'Sword, pickaxe, axe & co.',
     icon: '⚔️',
     gradient: 'linear-gradient(135deg,#d0a34f,#7a4f1f)'
+  },
+  {
+    type: 'armor',
+    label: 'Armor',
+    tagline: 'Helm, chestplate, leggings & boots',
+    icon: '🛡️',
+    gradient: 'linear-gradient(135deg,#5fb0d0,#1f5c7a)'
+  },
+  {
+    type: 'food',
+    label: 'Food',
+    tagline: 'Snacks, feasts & questionable stew',
+    icon: '🍗',
+    gradient: 'linear-gradient(135deg,#d06b4f,#7a2b1f)'
+  },
+  {
+    type: 'ore',
+    label: 'Ore',
+    tagline: 'Minable ore that drops and smelts',
+    icon: '💎',
+    gradient: 'linear-gradient(135deg,#4f7ad0,#1f2f7a)'
   },
   {
     type: 'texture',
@@ -238,6 +316,42 @@ function jsonBytes(obj) {
 
 function texturePng(grid, w = 16, h = 16) {
   return renderPng(grid, w, h);
+}
+
+/**
+ * Build a 64×64 translucent armor-layer texture from a 16×16 item grid.
+ * Each body part region on the armour layer (head/chest/legs/feet) receives
+ * the scaled-up artwork with 204 alpha so worn armor shows the player
+ * model underneath. Cadences/regions follow the classic vanilla armour layer.
+ */
+function armorLayerBytes(grid16) {
+  const S = 64;
+  const layer = Array(S * S).fill('#00000000');
+  const copy = (dstX, dstY, srcX, srcY, w, h, scale) => {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const src = grid16[srcY * 16 + srcX];
+        if (!src || (src.length === 9 && src.endsWith('00'))) continue; // transparent
+        const r = src.slice(1, 7);
+        for (let yy = 0; yy < scale; yy++) {
+          for (let xx = 0; xx < scale; xx++) {
+            const dx = dstX + x * scale + xx;
+            const dy = dstY + y * scale + yy;
+            if (dx >= 0 && dx < S && dy >= 0 && dy < S) layer[dy * S + dx] = `#${r}cc`;
+          }
+        }
+      }
+    }
+  };
+  // head
+  copy(8, 0, 0, 0, 16, 8, 1);
+  // chest
+  copy(16, 16, 0, 8, 16, 4, 1);
+  // legs (leggings region)
+  copy(16, 32, 0, 8, 16, 4, 1);
+  // feet
+  copy(16, 48, 0, 12, 16, 4, 1);
+  return renderPng(layer, S, S);
 }
 
 export const javaForge = {
@@ -323,15 +437,24 @@ export const javaForge = {
           parent: 'minecraft:item/handheld',
           textures: { layer0: `${ns}:${texRef}` }
         });
-        // 1.21+ item definition — makes the tool glow in the hotbar
+        // 1.21.4+ data-driven item with combat + durability behaviour
         files['data/' + ns + '/item/' + id + '.json'] = jsonBytes({
-          model: { type: 'minecraft:model', model: `${ns}:item/${id}` }
+          model: { type: 'minecraft:model', model: `${ns}:item/${id}` },
+          attributes: [
+            { type: 'minecraft:attack_damage', amount: Number(node.attackDamage) || 1, operation: 'add_value', id: `${ns}:attack.${id}` },
+            { type: 'minecraft:attack_speed', amount: -2.4, operation: 'add_value', id: `${ns}:speed.${id}` }
+          ],
+          max_stack_size: 1,
+          max_damage: Number(node.durability) || 264,
+          ...(isSword
+            ? { tool: { rules: [], damage_per_block: 1 } }
+            : { tool: { rules: [{ blocks: `#minecraft:mineable/${kind === 'pickaxe' ? 'pickaxe' : kind === 'axe' ? 'axe' : kind === 'shovel' ? 'shovel' : 'hoe'}`, speed: Number(node.digSpeed) || 6, correct_for_drops: true }], damage_per_block: 1 } })
         });
         files['data/' + ns + '/recipe/' + id + '.json'] = jsonBytes({
           type: 'minecraft:crafting_shaped',
           category: 'equipment',
           pattern,
-          key: { I: { item: 'minecraft:iron_ingot' }, S: { item: 'minecraft:stick' } },
+          key: { I: { item: lookupIngredient(node, 'I') || 'minecraft:iron_ingot' }, S: { item: 'minecraft:stick' } },
           result: { id: `${ns}:${id}` }
         });
         files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
@@ -347,19 +470,117 @@ export const javaForge = {
       }
 
       case 'recipe': {
-        // shaped recipe from the 3x3 grid + shape letters
-        const shape = node.shape || [['#', '#'], ['#', '#']];
-        const letters = new Set(shape.flat().filter((c) => c && c !== ' '));
+        // shaped recipe from the 3x3 grid + shape letters, or a smelting recipe
+        if (node.recipeKind === 'smelting') {
+          files['data/' + ns + '/recipe/' + id + '.json'] = jsonBytes({
+            type: 'minecraft:smelting',
+            category: 'misc',
+            experience: Number(node.smeltXp) || 0.7,
+            cookingtime: 200,
+            ingredient: { item: String(node.smeltInput || 'minecraft:iron_ore') },
+            result: { id: String(node.smeltResult || 'minecraft:iron_ingot'), count: 1 }
+          });
+          break;
+        }
+        const shape = node.shape || [['A', 'A'], ['A', 'A']];
+        const letters = new Set(shape.flat().filter((c) => c && c.trim()));
         const entry = letters.size
-          ? Object.fromEntries([...letters].map((l) => [l, { item: 'minecraft:iron_ingot' }]))
+          ? Object.fromEntries([...letters].map((l) => [l, { item: lookupIngredient(node, l) }]))
           : {};
         files['data/' + ns + '/recipe/' + id + '.json'] = jsonBytes({
           type: 'minecraft:crafting_shaped',
           category: 'misc',
-          pattern: shape.map((row) => row.join('').replace(/ /g, ' ').trimEnd()),
+          group: `${ns}:${id}`,
+          pattern: shape.map((row) => row.map((c) => (c && c.trim() ? c : ' ')).join('')),
           key: entry,
           result: { id: node.resultItem || 'minecraft:diamond', count: Number(node.resultCount) || 1 }
         });
+        break;
+      }
+
+      case 'food': {
+        files['data/' + ns + '/item/' + id + '.json'] = jsonBytes({
+          model: { type: 'minecraft:model', model: `${ns}:item/${id}` },
+          food: {
+            nutrition: Number(node.nutrition) || 4,
+            saturation: Number(node.saturation) || 0.6,
+            can_always_eat: !!node.canAlwaysEat
+          },
+          ...(Number(node.maxStack) !== 1 ? {} : { max_stack_size: 1 })
+        });
+        files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
+          parent: 'minecraft:item/generated',
+          textures: { layer0: `${ns}:${texRef}` }
+        });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'armor': {
+        const slotJava = { helmet: 'head', chestplate: 'chest', leggings: 'legs', boots: 'feet' }[node.armorSlot || 'chest'];
+        files['data/' + ns + '/item/' + id + '.json'] = jsonBytes({
+          model: { type: 'minecraft:model', model: `${ns}:item/${id}` },
+          attributes: [
+            { type: 'minecraft:armor', amount: Number(node.protection) || 1, slot: slotJava, operation: 'add_value', id: `${ns}:armor.${id}` }
+          ],
+          max_stack_size: 1
+        });
+        files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
+          parent: 'minecraft:item/generated',
+          textures: { layer0: `${ns}:${texRef}` }
+        });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'ore': {
+        const drop = String(node.oreDrop || `${ns}:${id}`);
+        // blockstate → cube_all model → drops itself (or a custom item) via loot table.
+        files['assets/' + ns + '/blockstates/' + id + '.json'] = jsonBytes({
+          variants: { '': { model: `${ns}:block/${id}` } }
+        });
+        files['assets/' + ns + '/models/block/' + id + '.json'] = jsonBytes({
+          parent: 'minecraft:block/cube_all',
+          textures: { all: `${ns}:${texRef}` }
+        });
+        files['assets/' + ns + '/models/item/' + id + '.json'] = jsonBytes({
+          parent: `${ns}:block/${id}`
+        });
+        files['data/' + ns + '/loot_table/blocks/' + id + '.json'] = jsonBytes({
+          type: 'minecraft:block',
+          pools: [
+            {
+              rolls: 1,
+              entries: [
+                {
+                  type: 'minecraft:item',
+                  name: drop,
+                  functions: [
+                    {
+                      function: 'minecraft:set_count',
+                      count: {
+                        type: 'minecraft:uniform',
+                        min: 1,
+                        max: Math.max(1, Number(node.oreCount) || 1)
+                      }
+                    }
+                  ]
+                }
+              ],
+              conditions: [{ condition: 'minecraft:survives_explosion' }]
+            }
+          ]
+        });
+        // Smelt the mined drop into an ingot (classic ore upgrade path).
+        files['data/' + ns + '/recipe/' + id + '_smelt.json'] = jsonBytes({
+          type: 'minecraft:smelting',
+          category: 'misc',
+          experience: Number(node.smeltXp) || 0.7,
+          cookingtime: 200,
+          ingredient: { item: drop },
+          result: { id: String(node.smeltResult || 'minecraft:iron_ingot'), count: 1 }
+        });
+        files['assets/' + ns + '/textures/' + texRef + '.png'] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
@@ -547,6 +768,7 @@ export const bedrockForge = {
 
     switch (node.type) {
       case 'block': {
+        const category = node.category || 'nature';
         const tag = node.creativeTab && node.creativeTab !== 'none'
           ? { tags: [`${ns}:${node.creativeTab}`] } : {};
         bp[`blocks/${id}.json`] = jsonBytes({
@@ -555,16 +777,18 @@ export const bedrockForge = {
             description: {
               identifier: `${ns}:${id}`,
               menu_category: {
-                category: node.category || 'nature',
-                group: 'minecraft:itemGroup.name.' + (node.category || 'nature')
+                category,
+                group: 'minecraft:itemGroup.name.' + category
               }
             },
             components: {
-              'minecraft:geometry': 'minecraft:geometry.full_block',
+              // modern 1.21.x block format — no experiment toggle required
+              'minecraft:unit_cube': {},
               'minecraft:material_instances': {
                 '*': {
                   texture: `${ns}_${id}`,
-                  render_method: node.renderMethod || 'opaque'
+                  render_method: node.renderMethod || 'opaque',
+                  ambient_occlusion: true
                 }
               },
               'minecraft:destructible_by_mining': { seconds_to_destroy: 0.8 },
@@ -595,21 +819,36 @@ export const bedrockForge = {
               identifier: `${ns}:${id}`,
               is_spawnable: true,
               is_summonable: true,
-              spawn_category: node.category || 'creature',
-              ...(node.spawnEgg
-                ? { spawn_egg: { base_color: '#8a5a3a', overlay_color: '#ff9c3f' } }
-                : {})
+              spawn_category: node.hostile ? 'monster' : node.category || 'creature'
             },
             component_groups: {},
             components: {
+              'minecraft:type_family': { family: [id, node.hostile ? 'monster' : 'creature'] },
               'minecraft:health': { value: Number(node.health) || 20 },
               'minecraft:movement': { value: Number(node.speed) || 0.25 },
+              'minecraft:movement.basic': {},
+              'minecraft:navigation.walk': { can_path_over_water: true, avoid_water: true },
               'minecraft:attack': { damage: Number(node.damage) || 3 },
               'minecraft:physics': {},
               'minecraft:pushable': { is_pushable: true, is_pushable_by_piston: true },
               'minecraft:nameable': { allow_name_tag_renaming: true },
               'minecraft:collision_box': { width: 0.6, height: 1.8 },
-              'minecraft:scale': { value: 1 },
+              'minecraft:scale': { value: Number(node.scale) > 0 ? Number(node.scale) : 1 },
+              'minecraft:behavior.float': { priority: 0 },
+              ...(node.hostile
+                ? {
+                    'minecraft:behavior.nearest_attackable_target': {
+                      priority: 2,
+                      entity_types: [{ filters: { test: 'is_family', subject: 'other', value: 'player' } }],
+                      must_see: true,
+                      reselect_target_in_ticks: 20
+                    },
+                    'minecraft:behavior.hurt_by_target': { priority: 1 },
+                    'minecraft:behavior.melee_attack': { priority: 3, speed_multiplier: 1 }
+                  }
+                : {}),
+              'minecraft:behavior.random_stroll': { priority: 4, speed_multiplier: 0.8 },
+              'minecraft:behavior.random_look_around': { priority: 6 },
               'minecraft:loot': { table: `loot_tables/entities/${id}.json` },
               'minecraft:despawn': { despawn_from_distance: { min_distance: 48, max_distance: 64 } }
             },
@@ -627,7 +866,15 @@ export const bedrockForge = {
               materials: { default: 'entity_alphatest' },
               textures: { default: `textures/entity/${id}` },
               geometry: { default: `geo.${id}.geometry` },
-              render_controllers: ['controller.render.default']
+              render_controllers: ['controller.render.default'],
+              ...(node.spawnEgg
+                ? {
+                    spawn_egg: {
+                      base_color: node.spawnEggBase || '#8a5a3a',
+                      overlay_color: node.spawnEggOverlay || '#ff9c3f'
+                    }
+                  }
+                : {})
             }
           }
         });
@@ -646,17 +893,16 @@ export const bedrockForge = {
 
       case 'item': {
         bp[`items/${id}.json`] = jsonBytes({
-          format_version: '1.20.60',
+          format_version: '1.21.10',
           'minecraft:item': {
             description: {
               identifier: `${ns}:${id}`,
-              category: node.category || 'items',
-              icon: `${ns}_${id}`
+              menu_category: { category: node.category || 'items' }
             },
             components: {
               'minecraft:max_stack_size': Number(node.maxStack) || 64,
               'minecraft:display_name': { value: node.name || id },
-              'minecraft:icon': { texture: `${ns}_${id}` }
+              'minecraft:icon': `${ns}_${id}`
             }
           }
         });
@@ -665,23 +911,175 @@ export const bedrockForge = {
       }
 
       case 'tool': {
+        const kind = ['sword', 'pickaxe', 'axe', 'shovel', 'hoe'].includes(node.toolKind)
+          ? node.toolKind : 'sword';
+        const dur = Number(node.durability) || 264;
+        const components = {
+          'minecraft:max_stack_size': 1,
+          'minecraft:hand_equipped': true,
+          'minecraft:durability': { max_durability: dur },
+          'minecraft:damage': Number(node.attackDamage) || 1,
+          'minecraft:display_name': { value: node.name || id },
+          'minecraft:icon': `${ns}_${id}`
+        };
+        if (kind !== 'sword') {
+          components['minecraft:digger'] = {
+            use_efficiency: true,
+            destroy_speeds: [
+              {
+                block: {
+                  tags: `q.any_tag('minecraft:is_${kind === 'pickaxe' ? 'pickaxe' : kind === 'axe' ? 'axe' : kind === 'shovel' ? 'shovel' : 'hoe'}_item_destructible')`
+                },
+                speed: Number(node.digSpeed) || 6
+              }
+            ]
+          };
+        }
         bp[`items/${id}.json`] = jsonBytes({
-          format_version: '1.20.60',
+          format_version: '1.21.10',
           'minecraft:item': {
             description: {
               identifier: `${ns}:${id}`,
-              category: 'equipment',
-              icon: `${ns}_${id}`
+              menu_category: { category: 'equipment' }
+            },
+            components
+          }
+        });
+        rp[`textures/items/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'food': {
+        bp[`items/${id}.json`] = jsonBytes({
+          format_version: '1.21.10',
+          'minecraft:item': {
+            description: {
+              identifier: `${ns}:${id}`,
+              menu_category: { category: 'items' }
             },
             components: {
-              'minecraft:max_stack_size': 1,
-              'minecraft:hand_equipped': true,
+              'minecraft:max_stack_size': Number(node.maxStack) || 64,
               'minecraft:display_name': { value: node.name || id },
-              'minecraft:icon': { texture: `${ns}_${id}` }
+              'minecraft:icon': `${ns}_${id}`,
+              'minecraft:use_animation': 'eat',
+              'minecraft:use_modifiers': { use_duration: Number(node.useDuration) || 1.6, movement_modifier: 0.35 },
+              'minecraft:food': {
+                nutrition: Number(node.nutrition) || 4,
+                saturation_modifier: Number(node.saturation) || 0.6,
+                can_always_eat: !!node.canAlwaysEat
+              }
             }
           }
         });
         rp[`textures/items/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
+        break;
+      }
+
+      case 'armor': {
+        const slot = node.armorSlot || 'chest';
+        const slotName = { helmet: 'Helmet', chestplate: 'Chestplate', leggings: 'Leggings', boots: 'Boots' }[slot];
+        const iconKey = `${ns}_${id}_${slot}`;
+        bp[`items/${id}.json`] = jsonBytes({
+          format_version: '1.21.10',
+          'minecraft:item': {
+            description: {
+              identifier: `${ns}:${id}`,
+              menu_category: { category: 'equipment', group: `minecraft:itemGroup.name.${slot}` }
+            },
+            components: {
+              'minecraft:max_stack_size': 1,
+              'minecraft:display_name': { value: `${node.name || id} ${slotName}` },
+              'minecraft:icon': iconKey,
+              'minecraft:wearable': { protection: Number(node.protection) || 1, slot: `slot.armor.${slot}` },
+              'minecraft:durability': { max_durability: Number(node.durability) || 300 }
+            }
+          }
+        });
+        // 16×16 item icon + a 64×64 armor-layer texture so the piece actually
+        // renders on the player model when worn.
+        rp[`textures/items/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
+        rp[`textures/models/armor/${id}.png`] = armorLayerBytes(pixelGridOf(node));
+        rp[`attachables/${id}.json`] = jsonBytes({
+          format_version: '1.10.0',
+          'minecraft:attachable': {
+            description: {
+              identifier: `${ns}:${id}`,
+              materials: { default: 'armor', enchanted: 'armor_enchanted' },
+              textures: {
+                default: `textures/models/armor/${id}`,
+                enchanted: 'textures/misc/enchanted_actor_glint'
+              },
+              geometry: {
+                default: {
+                  helmet: 'geometry.humanoid.armor.helmet',
+                  chestplate: 'geometry.humanoid.armor.chestplate',
+                  leggings: 'geometry.humanoid.armor.leggings',
+                  boots: 'geometry.humanoid.armor.boots'
+                }[slot]
+              },
+              scripts: {
+                parent_setup: `variable.${slot === 'helmet' ? 'helmet' : slot === 'chestplate' ? 'chest' : slot === 'leggings' ? 'legs' : 'feet'}_layer_visible = 0.0;`
+              },
+              render_controllers: ['controller.render.armor']
+            }
+          }
+        });
+        break;
+      }
+
+      case 'ore': {
+        const category = node.category || 'nature';
+        const drop = String(node.oreDrop || `${ns}:${id}`);
+        bp[`blocks/${id}.json`] = jsonBytes({
+          format_version: '1.21.0',
+          'minecraft:block': {
+            description: {
+              identifier: `${ns}:${id}`,
+              menu_category: {
+                category,
+                group: 'minecraft:itemGroup.name.' + category
+              }
+            },
+            components: {
+              'minecraft:unit_cube': {},
+              'minecraft:material_instances': {
+                '*': { texture: `${ns}_${id}`, render_method: 'opaque', ambient_occlusion: true }
+              },
+              'minecraft:destructible_by_mining': { seconds_to_destroy: 3 },
+              'minecraft:map_color': '#6a5a2c',
+              'minecraft:display_name': `${node.name || id}`
+            },
+            events: {}
+          }
+        });
+        bp[`loot_tables/blocks/${id}.json`] = jsonBytes({
+          pools: [
+            {
+              rolls: 1,
+              entries: [
+                {
+                  type: 'item',
+                  name: drop,
+                  weight: 1,
+                  functions: [
+                    { function: 'set_count', count: Math.max(1, Number(node.oreCount) || 1) }
+                  ]
+                }
+              ]
+            }
+          ]
+        });
+        // Smelt the mined drop into an ingot.
+        bp[`recipes/${id}_smelt.json`] = jsonBytes({
+          format_version: '1.20.10',
+          'minecraft:recipe_furnace': {
+            description: { identifier: `${ns}:smelt_${id}` },
+            tags: ['furnace', 'blast_furnace'],
+            input: drop,
+            output: String(node.smeltResult || 'minecraft:iron_ingot')
+          }
+        });
+        rp[`textures/blocks/${id}.png`] = texturePng(pixelGridOf(node), 16, 16);
         break;
       }
 
@@ -692,13 +1090,33 @@ export const bedrockForge = {
       }
 
       case 'recipe': {
+        // shaped crafting or smelting recipe
+        if (node.recipeKind === 'smelting') {
+          bp[`recipes/${id}.json`] = jsonBytes({
+            format_version: '1.20.10',
+            'minecraft:recipe_furnace': {
+              description: { identifier: `${ns}:${id}` },
+              tags: ['furnace', 'blast_furnace'],
+              input: String(node.smeltInput || 'minecraft:iron_ore'),
+              output: String(node.smeltResult || 'minecraft:iron_ingot')
+            }
+          });
+          break;
+        }
+        // Crafting recipes: empty grid cells become spaces, letters map to
+        // ingredients via the node's `ingredients` map (or a sensible default).
+        const shape = node.shape || [['A', 'A'], ['A', 'A']];
+        const letters = new Set(shape.flat().filter((c) => c && c.trim()));
+        const key = {};
+        [...letters].forEach((l) => { key[l] = { item: lookupIngredient(node, l) }; });
         bp[`recipes/${id}.json`] = jsonBytes({
-          format_version: '1.17.0',
+          format_version: '1.20.10',
           'minecraft:recipe_shaped': {
             description: { identifier: `${ns}:${id}` },
             tags: ['crafting_table'],
-            pattern: (node.shape || []).map((r) => r.join('')),
-            key: { '#': { item: 'minecraft:iron_ingot' } },
+            pattern: shape.map((r) => r.map((c) => (c && c.trim() ? c : ' ')).join('')),
+            key,
+            unlock: [{ item: 'minecraft:crafting_table' }],
             result: { item: node.resultItem || 'minecraft:diamond', count: Number(node.resultCount) || 1 }
           }
         });
@@ -745,7 +1163,13 @@ export const bedrockForge = {
       const ns = node.namespace || 'fabrica';
       const id = sanitizeId(node.identifier);
       if (node.type === 'block') terrain[`${ns}_${id}`] = `textures/blocks/${id}`;
-      else if (node.type === 'item' || node.type === 'tool') items[`${ns}_${id}`] = `textures/items/${id}`;
+      else if (node.type === 'item' || node.type === 'tool' || node.type === 'food') items[`${ns}_${id}`] = `textures/items/${id}`;
+      else if (node.type === 'armor') {
+        // one bedrock item per slot — all render from the same texture art
+        const slot = node.armorSlot || 'chest';
+        items[`${ns}_${id}_${slot}`] = `textures/items/${id}`;
+      }
+      else if (node.type === 'ore') terrain[`${ns}_${id}`] = `textures/blocks/${id}`;
       else if (node.type === 'texture') {
         (node.textureCategory === 'item' ? items : terrain)[`${ns}_${id}`] =
           `textures/${node.textureCategory === 'item' ? 'items' : 'blocks'}/${id}`;
@@ -768,6 +1192,8 @@ export const bedrockForge = {
       });
     }
 
+    // min_engine_version must be >= every content file's format_version, or
+    // Bedrock silently skips those files on world load (import works, world shows nothing).
     const manifest = (packName, type) => ({
       format_version: 2,
       header: {
@@ -775,14 +1201,14 @@ export const bedrockForge = {
         description: project.description || 'Made with Fabrica',
         uuid: type === 'resources' ? rpUuid : bpUuid,
         version: [1, 0, 0],
-        min_engine_version: [1, 20, 0]
+        min_engine_version: [1, 21, 10]
       },
       modules: [
         { type: type === 'resources' ? 'resources' : 'data', uuid: mkUuid(), version: [1, 0, 0] }
       ],
       dependencies: type === 'resources'
         ? []
-        : [{ uuid: rpUuid, version: [1, 0, 0], module_name: '@vanilla' }]
+        : [{ uuid: rpUuid, version: [1, 0, 0] }]
     });
 
     const writeSingle = (folder, files, rootZip = zip) => {

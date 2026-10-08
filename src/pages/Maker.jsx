@@ -162,6 +162,12 @@ function projectId() {
     : uid();
 }
 
+function uuid4() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : '00000000-0000-4000-8000-000000000000';
+}
+
 function freshProject(edition, id) {
   return {
     id,
@@ -376,6 +382,13 @@ function Studio({
     if (!canExport || busy) return;
     setBusy(true);
     try {
+      // Persist pack UUIDs so re-exporting updates the same pack instead of
+      // spawning a brand-new uninstalled pack every time.
+      if (project.edition === 'bedrock') {
+        if (!project.rpUuid) updateProject({ rpUuid: uuid4() });
+        if (!project.bpUuid) updateProject({ bpUuid: uuid4() });
+        await new Promise((r) => setTimeout(r, 0));
+      }
       let file;
       if (project.edition === 'java') {
         file = await javaForge.pack(project, project.nodes);
@@ -387,7 +400,10 @@ function Studio({
         file = await bedrockForge.pack(project, project.nodes, 'resource');
       }
       downloadFile(file);
-      showToast(`⛏ Exported ${file.name} — go install it!`);
+      const installHint = project.edition === 'bedrock'
+        ? ' import to Bedrock, then enable BOTH packs in world settings.'
+        : ' drop it in your world’s datapacks folder.';
+      showToast(`⛏ Exported ${file.name} —${installHint}`);
     } catch (err) {
       console.error(err);
       showToast('⚠ Export failed. Check your identifiers and try again.');
@@ -752,6 +768,30 @@ function NodeEditor({ node, update, remove, project }) {
 const TIERS = ['wooden', 'stone', 'iron', 'gold', 'diamond', 'netherite'];
 const TOOL_KINDS = ['sword', 'pickaxe', 'axe', 'shovel', 'hoe'];
 
+const TIER_DEFAULTS = {
+  wooden:  { damage: 4, durability: 60,    digSpeed: 2 },
+  stone:   { damage: 5, durability: 132,   digSpeed: 4 },
+  iron:    { damage: 6, durability: 251,   digSpeed: 6 },
+  gold:    { damage: 5, durability: 33,    digSpeed: 12 },
+  diamond: { damage: 7, durability: 1562,  digSpeed: 8 },
+  netherite:{ damage: 8, durability: 2032, digSpeed: 9 }
+};
+
+function applyTier(set, node, tier) {
+  const d = TIER_DEFAULTS[tier] || TIER_DEFAULTS.iron;
+  set({ tier, attackDamage: d.damage, durability: d.durability, digSpeed: d.digSpeed });
+}
+
+function ColorField({ label, value, onChange }) {
+  return (
+    <label className="color-field">
+      <span className="term color-field-label">{label}</span>
+      <input type="color" value={value || '#8a5a3a'} onChange={(e) => onChange(e.target.value)} />
+      <input className="color-hex term" value={value || '#8a5a3a'} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
 function NodeSpecific({ node, set, project }) {
   switch (node.type) {
     case 'block':
@@ -805,12 +845,28 @@ function NodeSpecific({ node, set, project }) {
           <Field label="Movement speed" hint="Vanilla player ≈ 0.1, zombie ≈ 0.23.">
             <input type="number" min="0" step="0.01" value={node.speed} onChange={(e) => set({ speed: e.target.value })} />
           </Field>
+          <Field label="Scale" hint="1 = normal mob, 0.5 = baby, 2 = giant.">
+            <input type="number" min="0.1" step="0.1" value={node.scale || 1} onChange={(e) => set({ scale: e.target.value })} />
+          </Field>
+          <div className="spawn-row">
+            <label className="toggle-row">
+              <input type="checkbox" checked={!!node.hostile} onChange={(e) => set({ hostile: e.target.checked })} />
+              <span>Hostile — attacks players on sight</span>
+            </label>
+          </div>
           <div className="spawn-row">
             <label className="toggle-row">
               <input type="checkbox" checked={!!node.spawnEgg} onChange={(e) => set({ spawnEgg: e.target.checked })} />
               <span>Give it a spawn egg</span>
             </label>
           </div>
+
+          {node.spawnEgg && (
+            <div className="egg-colors">
+              <ColorField label="Egg base" value={node.spawnEggBase || '#8a5a3a'} onChange={(v) => set({ spawnEggBase: v })} />
+              <ColorField label="Egg spots" value={node.spawnEggOverlay || '#ff9c3f'} onChange={(v) => set({ spawnEggOverlay: v })} />
+            </div>
+          )}
 
           <SectionTitle>Mob skin — {MOB_SKIN_SIZE}×{MOB_SKIN_SIZE} editor</SectionTitle>
           <div className="painter-slot">
@@ -859,10 +915,26 @@ function NodeSpecific({ node, set, project }) {
               {TOOL_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           </Field>
-          <Field label="Material tier">
-            <select value={node.tier || 'iron'} onChange={(e) => set({ tier: e.target.value })}>
+          <Field label="Material tier" hint="Sets defaults for damage, durability and dig speed.">
+            <select value={node.tier || 'iron'} onChange={(e) => applyTier(set, node, e.target.value)}>
               {TIERS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
+          </Field>
+          <SectionTitle>Combat & mining</SectionTitle>
+          <Field label="Attack damage" hint="Extra melee damage. Diamond sword ≈ 7.">
+            <input type="number" min="1" value={node.attackDamage} onChange={(e) => set({ attackDamage: e.target.value })} />
+          </Field>
+          <Field label="Durability" hint="Diamond ≈ 1561, iron ≈ 251.">
+            <input type="number" min="1" value={node.durability} onChange={(e) => set({ durability: e.target.value })} />
+          </Field>
+          {node.toolKind !== 'sword' && (
+            <Field label="Dig speed" hint="Higher = breaks matching blocks faster.">
+              <input type="number" min="0" step="0.5" value={node.digSpeed} onChange={(e) => set({ digSpeed: e.target.value })} />
+            </Field>
+          )}
+          <SectionTitle>Recipe ingredients</SectionTitle>
+          <Field label="Head material" hint="The ingredient represented by I in the tool recipe.">
+            <input value={(node.ingredients && node.ingredients.I) || 'minecraft:iron_ingot'} onChange={(e) => set({ ingredients: { ...(node.ingredients || {}), I: e.target.value } })} placeholder="minecraft:iron_ingot" />
           </Field>
           <SectionTitle>Texture — 16×16 editor</SectionTitle>
           <div className="painter-slot">
@@ -870,6 +942,99 @@ function NodeSpecific({ node, set, project }) {
               grid={node.pixelGrid || []}
               setGrid={(g) => set({ pixelGrid: g })}
               category="item"
+              width={16}
+            />
+          </div>
+        </>
+      );
+
+    case 'armor':
+      return (
+        <>
+          <SectionTitle>Armor piece</SectionTitle>
+          <Field label="Slot">
+            <select value={node.armorSlot || 'chest'} onChange={(e) => set({ armorSlot: e.target.value })}>
+              <option value="helmet">Helmet</option>
+              <option value="chestplate">Chestplate</option>
+              <option value="leggings">Leggings</option>
+              <option value="boots">Boots</option>
+            </select>
+          </Field>
+          <Field label="Protection" hint="Iron ≈ 2–3, diamond ≈ 3–4 per piece.">
+            <input type="number" min="1" max="12" value={node.protection} onChange={(e) => set({ protection: e.target.value })} />
+          </Field>
+          <Field label="Durability" hint="Iron chest ≈ 240, diamond chest ≈ 528.">
+            <input type="number" min="1" value={node.durability} onChange={(e) => set({ durability: e.target.value })} />
+          </Field>
+          <SectionTitle>Texture — 16×16 item art</SectionTitle>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="item"
+              width={16}
+            />
+          </div>
+        </>
+      );
+
+    case 'food':
+      return (
+        <>
+          <SectionTitle>Munchies</SectionTitle>
+          <Field label="Nutrition" hint="Hunger points restored (1 shank = 2).">
+            <input type="number" min="1" max="20" value={node.nutrition} onChange={(e) => set({ nutrition: e.target.value })} />
+          </Field>
+          <Field label="Saturation" hint="0–1. Golden carrot ≈ 1.2, bread ≈ 0.6.">
+            <input type="number" min="0" step="0.1" value={node.saturation} onChange={(e) => set({ saturation: e.target.value })} />
+          </Field>
+          <Field label="Use duration (seconds)" hint="How long eating takes. Stew ≈ 1.6, golden apple ≈ 1.6.">
+            <input type="number" min="0.1" step="0.1" value={node.useDuration || 1.6} onChange={(e) => set({ useDuration: e.target.value })} />
+          </Field>
+          <div className="spawn-row">
+            <label className="toggle-row">
+              <input type="checkbox" checked={!!node.canAlwaysEat} onChange={(e) => set({ canAlwaysEat: e.target.checked })} />
+              <span>Can eat even when full</span>
+            </label>
+          </div>
+          <SectionTitle>Texture — 16×16 editor</SectionTitle>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="item"
+              width={16}
+            />
+          </div>
+        </>
+      );
+
+    case 'ore':
+      return (
+        <>
+          <SectionTitle>Ore block</SectionTitle>
+          <Field label="Creative category">
+            <select value={node.category || 'nature'} onChange={(e) => set({ category: e.target.value })}>
+              {['construction', 'nature', 'equipment', 'items', 'none'].map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Drops item" hint="What you get when the ore breaks (defaults to the ore itself).">
+            <input value={node.oreDrop || ''} onChange={(e) => set({ oreDrop: e.target.value })} placeholder={'e.g. ' + project.namespace + ':ruby'} />
+          </Field>
+          <Field label="Drop amount">
+            <input type="number" min="1" max="64" value={node.oreCount} onChange={(e) => set({ oreCount: e.target.value })} />
+          </Field>
+          <Field label="Smelts into" hint="Furnace recipe made automatically.">
+            <input value={node.smeltResult || 'minecraft:iron_ingot'} onChange={(e) => set({ smeltResult: e.target.value })} placeholder="minecraft:iron_ingot" />
+          </Field>
+          <SectionTitle>Texture — 16×16 editor</SectionTitle>
+          <div className="painter-slot">
+            <TexturePainter
+              grid={node.pixelGrid || []}
+              setGrid={(g) => set({ pixelGrid: g })}
+              category="block"
               width={16}
             />
           </div>
@@ -903,14 +1068,40 @@ function NodeSpecific({ node, set, project }) {
     case 'recipe':
       return (
         <>
-          <SectionTitle>Shaped recipe</SectionTitle>
-          <RecipeGrid node={node} set={set} />
-          <Field label="Result item" hint="Identifier of what this crafts onto.">
-            <input value={node.resultItem || 'minecraft:diamond'} onChange={(e) => set({ resultItem: e.target.value })} placeholder="minecraft:diamond" />
+          <SectionTitle>Recipe kind</SectionTitle>
+          <Field label="Type">
+            <select value={node.recipeKind || 'crafting'} onChange={(e) => set({ recipeKind: e.target.value })}>
+              <option value="crafting">Crafting table — shaped 3×3</option>
+              <option value="smelting">Furnace — smelt one item into another</option>
+            </select>
           </Field>
-          <Field label="Amount">
-            <input type="number" min="1" value={node.resultCount || 1} onChange={(e) => set({ resultCount: e.target.value })} />
-          </Field>
+
+          {(node.recipeKind === 'smelting') ? (
+            <>
+              <Field label="Input item" hint="What goes into the furnace.">
+                <input value={node.smeltInput || 'minecraft:iron_ore'} onChange={(e) => set({ smeltInput: e.target.value })} placeholder="minecraft:iron_ore" />
+              </Field>
+              <Field label="Output item" hint="What comes out.">
+                <input value={node.smeltResult || 'minecraft:iron_ingot'} onChange={(e) => set({ smeltResult: e.target.value })} placeholder="minecraft:iron_ingot" />
+              </Field>
+              <Field label="Experience (Java)" hint="XP granted per smelt on Java Edition.">
+                <input type="number" min="0" step="0.1" value={node.smeltXp || 0.7} onChange={(e) => set({ smeltXp: e.target.value })} />
+              </Field>
+            </>
+          ) : (
+            <>
+              <SectionTitle>Shaped recipe</SectionTitle>
+              <RecipeGrid node={node} set={set} />
+              <Field label="Result item" hint="Identifier of what this crafts onto.">
+                <input value={node.resultItem || 'minecraft:diamond'} onChange={(e) => set({ resultItem: e.target.value })} placeholder="minecraft:diamond" />
+              </Field>
+              <Field label="Amount">
+                <input type="number" min="1" value={node.resultCount || 1} onChange={(e) => set({ resultCount: e.target.value })} />
+              </Field>
+              <SectionTitle>Ingredients</SectionTitle>
+              <RecipeIngredients node={node} set={set} />
+            </>
+          )}
         </>
       );
 
@@ -986,6 +1177,32 @@ function NodeSpecific({ node, set, project }) {
     default:
       return null;
   }
+}
+
+function RecipeIngredients({ node, set }) {
+  const shape = node.shape || [];
+  const letters = [...new Set(shape.flat().filter((c) => c && c !== ' '))];
+  const map = node.ingredients || {};
+  if (!letters.length) {
+    return (
+      <p className="ghost node-note">
+        Fill a few cells in the grid above — every letter gets an ingredient slot here.
+      </p>
+    );
+  }
+  return (
+    <div className="recipe-ingredients">
+      {letters.map((l) => (
+        <Field key={l} label={`Ingredient “${l}”`}>
+          <input
+            value={map[l] || ''}
+            onChange={(e) => set({ ingredients: { ...map, [l]: e.target.value } })}
+            placeholder="minecraft:iron_ingot"
+          />
+        </Field>
+      ))}
+    </div>
+  );
 }
 
 function RecipeGrid({ node, set }) {
